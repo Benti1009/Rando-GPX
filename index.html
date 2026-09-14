@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <!-- Mode "app" iOS : effectif seulement une fois la page ajoutée à l'écran d'accueil via
+       Safari > Partager > "Sur l'écran d'accueil". Sans effet dans un onglet Safari classique. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Rando GPX">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap');
+    :root {
+      --accent: #c8102e;
+      --accent-dark: #a30d25;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      overscroll-behavior-y: none;
+      font-family: 'Barlow', -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: #1f2430;
+    }
+
+    #app {
+      display: flex; flex-direction: column;
+      height: 100vh; height: 100dvh;
+    }
+
+    header {
+      flex-shrink: 0;
+      background: #fff; border-bottom: 1px solid #e5e7eb;
+      padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    h1 {
+      font-family: 'Barlow Condensed', -apple-system, sans-serif; font-weight: 700; font-size: 20px;
+      margin: 0; color: #1f2430;
+    }
+    .top-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+    /* Bouton "Choisir un fichier" stylisé (l'input natif est masqué mais reste accessible) */
+    #gpxFile { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+    label.file-btn {
+      background: var(--accent); color: #fff; font-weight: 600; font-size: 13px;
+      padding: 9px 16px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+    }
+    label.file-btn:active { background: var(--accent-dark); }
+
+    #fileName { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #stats {
+      display: none;
+      flex-wrap: wrap; gap: 6px 16px;
+      font-size: 12px; color: #374151;
+    }
+    #stats .stat b { color: #1f2430; font-size: 13px; }
+
+    #message {
+      display: none;
+      font-size: 12px; border-radius: 6px; padding: 8px 10px;
+    }
+    #message.error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
+    #message.info  { color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; }
+
+    #map { height: 100%; width: 100%; background: #e5e7eb; }
+
+    #emptyOverlay {
+      position: absolute; inset: 0; top: auto;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; padding: 24px;
+    }
+    #emptyOverlay span {
+      background: rgba(255,255,255,0.92); color: #6b7280; font-size: 13px;
+      padding: 10px 16px; border-radius: 8px; text-align: center;
+    }
+
+    /* Boutons flottants au-dessus de la carte */
+    .map-fabs {
+      position: absolute;
+      right: max(16px, env(safe-area-inset-right));
+      bottom: max(16px, env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 10px;
+      z-index: 1000;
+    }
+    .fab {
+      width: 46px; height: 46px; border-radius: 50%;
+      background: #fff; border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+      font-size: 20px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; padding: 0;
+    }
+    .fab:active { background: #f3f4f6; }
+    .fab.active { background: var(--accent); border-color: var(--accent-dark); color: #fff; }
+    .fab:disabled { opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="top-row">
+        <h1>Rando GPX</h1>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span id="fileName"></span>
+          <label class="file-btn" for="gpxFile">Choisir un fichier</label>
+          <!-- Pas d'attribut "accept" : iOS ne connaît pas l'extension .gpx (contrairement à
+               .pdf ou .jpg) et grise le fichier dans le sélecteur si on tente de filtrer dessus.
+               On laisse donc tout sélectionnable, et on vérifie l'extension nous-mêmes ensuite. -->
+          <input type="file" id="gpxFile">
+        </div>
+      </div>
+      <div id="stats"></div>
+      <div id="message"></div>
+    </header>
+
+    <div style="position:relative; flex:1; min-height:0;">
+      <div id="map"></div>
+      <div id="emptyOverlay"><span>Choisis un fichier .gpx pour afficher le tracé</span></div>
+      <div class="map-fabs">
+        <button id="gpsBtn" class="fab" title="Activer le suivi GPS" aria-label="Activer le suivi GPS">📍</button>
+        <button id="offlineBtn" class="fab" title="Télécharger la carte pour usage hors-ligne" aria-label="Télécharger la carte pour usage hors-ligne">⬇️</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ========================================================================
+    // Service Worker : permet à l'app de fonctionner même après une fermeture
+    // complète et une réouverture sans réseau (mise en cache de la page elle-
+    // même, de Leaflet et des polices). Sans effet si le navigateur ne
+    // supporte pas les Service Workers, ou si servi hors HTTPS.
+    // ========================================================================
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          console.warn('Échec d\'enregistrement du Service Worker :', err);
+        });
+      });
+    }
+
+    // ========================================================================
+    // Carte
+    // ========================================================================
+    const map = L.map('map', { zoomControl: true }).setView([46.6, 2.4], 6); // vue par défaut : France
+
+    window.addEventListener('resize', function () { map.invalidateSize(); });
+    setTimeout(function () { map.invalidateSize(); }, 300);
+
+    // ========================================================================
+    // Cache hors-ligne des tuiles (IndexedDB) + calque personnalisé qui l'utilise
+    // ========================================================================
+    const TILE_DB_NAME = 'randoGpxTiles';
+    const TILE_STORE = 'tiles';
+    let tileDbPromise = null;
+
+    function openTileDb_() {
+      if (!tileDbPromise) {
+        tileDbPromise = new Promise(function (resolve, reject) {
+          const req = indexedDB.open(TILE_DB_NAME, 1);
+          req.onupgradeneeded = function () { req.result.createObjectStore(TILE_STORE); };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
+        });
+      }
+      return tileDbPromise;
+    }
+    function getCachedTile_(key) {
+      return openTileDb_().then(function (db) {
+        return new Promise(function (resolve) {
+          const tx = db.transaction(TILE_STORE, 'readonly');
+          const req = tx.objectStore(TILE_STORE).get(key);
+          req.onsuccess = function () { resolve(req.result || null); };
+          req.onerror = function () { resolve(null); };
+        });
+      }).catch(function () { return null; });
+    }
+    function putCachedTile_(key, blob) {
+      return openTileDb_().then(function (db) {
+        return new Promise(function (resolve) {
+          const tx = db.transaction(TILE_STORE, 'readwrite');
+          tx.objectStore(TILE_STORE).put(blob, key);
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = function () { resolve(); };
+        });
+      }).catch(function () {});
+    }
+
+    // Calque de tuiles qui sert d'abord depuis le cache local si disponible (mode hors-ligne),
+    // et sinon charge normalement depuis le réseau comme un calque Leaflet classique. La mise
+    // en cache elle-même ne se fait que via le bouton de téléchargement (pas en arrière-plan
+    // à chaque tuile vue), pour rester prévisible en consommation de données.
+    const OfflineTileLayer = L.TileLayer.extend({
+      createTile: function (coords, done) {
+        const img = document.createElement('img');
+        img.alt = '';
+        const key = coords.z + '/' + coords.x + '/' + coords.y;
+        const url = this.getTileUrl(coords);
+        getCachedTile_(key).then(function (blob) {
+          if (blob) {
+            img.src = URL.createObjectURL(blob);
+            done(null, img);
+          } else {
+            img.onload = function () { done(null, img); };
+            img.onerror = function (e) { done(e, img); };
+            img.src = url;
+          }
+        });
+        return img;
+      }
+    });
+
+    const tileLayer = new OfflineTileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    function lonToTileX_(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
+    function latToTileY_(lat, z) {
+      const rad = lat * Math.PI / 180;
+      return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, z));
+    }
+    function tilesForBounds_(bounds, zoom) {
+      const minX = lonToTileX_(bounds.getWest(), zoom), maxX = lonToTileX_(bounds.getEast(), zoom);
+      const minY = latToTileY_(bounds.getNorth(), zoom), maxY = latToTileY_(bounds.getSouth(), zoom);
+      const tiles = [];
+      for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) tiles.push({ x: x, y: y, z: zoom });
+      }
+      return tiles;
+    }
+    async function processInBatches_(items, worker, concurrency) {
+      let idx = 0;
+      async function next() {
+        while (idx < items.length) {
+          const i = idx++;
+          await worker(items[i]);
+        }
+      }
+      const runners = [];
+      for (let i = 0; i < concurrency; i++) runners.push(next());
+      await Promise.all(runners);
+    }
+
+    async function downloadOffline_() {
+      const btn = document.getElementById('offlineBtn');
+      const bounds = currentLine ? currentLine.getBounds().pad(0.15) : map.getBounds();
+      const baseZoom = map.getZoom();
+      const minZoom = Math.max(10, baseZoom - 1);
+      const maxZoom = Math.min(16, baseZoom + 3);
+
+      let allTiles = [];
+      for (let z = minZoom; z <= maxZoom; z++) allTiles = allTiles.concat(tilesForBounds_(bounds, z));
+      const seen = new Set();
+      allTiles = allTiles.filter(function (t) {
+        const k = t.z + '/' + t.x + '/' + t.y;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+
+      if (allTiles.length > 1500) {
+        showMessage_('Zone trop grande pour un téléchargement hors-ligne (' + allTiles.length + ' tuiles). Zoome un peu avant de télécharger.', 'error');
+        return;
+      }
+      if (allTiles.length === 0) return;
+
+      btn.disabled = true;
+      btn.classList.add('active');
+      let done = 0, cached = 0, failed = 0;
+      showMessage_('Téléchargement hors-ligne : 0 / ' + allTiles.length + ' tuiles…', 'info');
+
+      await processInBatches_(allTiles, async function (t) {
+        const key = t.z + '/' + t.x + '/' + t.y;
+        const already = await getCachedTile_(key);
+        if (!already) {
+          try {
+            const resp = await fetch(tileLayer.getTileUrl({ x: t.x, y: t.y, z: t.z }));
+            if (resp.ok) { await putCachedTile_(key, await resp.blob()); cached++; }
+            else failed++;
+          } catch (e) { failed++; }
+        } else {
+          cached++;
+        }
+        done++;
+        if (done % 5 === 0 || done === allTiles.length) {
+          showMessage_('Téléchargement hors-ligne : ' + done + ' / ' + allTiles.length + ' tuiles…' + (failed ? ' (' + failed + ' échecs)' : ''), 'info');
+        }
+      }, 6);
+
+      btn.disabled = false;
+      btn.classList.remove('active');
+      if (cached === 0) {
+        showMessage_("Le téléchargement a échoué. Vérifie ta connexion et réessaie (idéalement en Wi-Fi).", 'error');
+      } else {
+        showMessage_('Zone disponible hors-ligne (' + cached + ' tuiles' + (failed ? ', ' + failed + ' non disponibles' : '') + '). Tant que tu ne quittes pas cette page, la carte restera visible sans réseau dans cette zone.', 'info');
+      }
+    }
+    document.getElementById('offlineBtn').addEventListener('click', downloadOffline_);
+
+    // ========================================================================
+    // Suivi GPS en direct
+    // ========================================================================
+    let gpsWatchId = null;
+    let gpsMarker = null;
+    let gpsAccuracyCircle = null;
+
+    function toggleGps_() {
+      const btn = document.getElementById('gpsBtn');
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+        if (gpsMarker) { map.removeLayer(gpsMarker); gpsMarker = null; }
+        if (gpsAccuracyCircle) { map.removeLayer(gpsAccuracyCircle); gpsAccuracyCircle = null; }
+        btn.classList.remove('active');
+        return;
+      }
+      if (!navigator.geolocation) {
+        showMessage_("La géolocalisation n'est pas disponible sur cet appareil ou ce navigateur.", 'error');
+        return;
+      }
+      btn.classList.add('active');
+      let firstFix = true;
+      gpsWatchId = navigator.geolocation.watchPosition(function (pos) {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+        if (!gpsMarker) {
+          gpsMarker = L.circleMarker([lat, lon], { radius: 8, color: '#1d4ed8', fillColor: '#3b82f6', fillOpacity: 1, weight: 2 }).addTo(map);
+          gpsAccuracyCircle = L.circle([lat, lon], { radius: acc, color: '#3b82f6', weight: 1, fillOpacity: 0.1 }).addTo(map);
+        } else {
+          gpsMarker.setLatLng([lat, lon]);
+          gpsAccuracyCircle.setLatLng([lat, lon]).setRadius(acc);
+        }
+        if (firstFix) {
+          map.setView([lat, lon], Math.max(map.getZoom(), 14));
+          firstFix = false;
+        }
+      }, function (err) {
+        showMessage_('Position GPS indisponible : ' + err.message, 'error');
+        btn.classList.remove('active');
+        gpsWatchId = null;
+      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+    }
+    document.getElementById('gpsBtn').addEventListener('click', toggleGps_);
+
+    let currentLine = null;
+    let currentMarkers = [];
+
+    function clearTrack_() {
+      if (currentLine) { map.removeLayer(currentLine); currentLine = null; }
+      currentMarkers.forEach(function (m) { map.removeLayer(m); });
+      currentMarkers = [];
+    }
+
+    function drawTrack_(points) {
+      clearTrack_();
+      const latlngs = points.map(function (p) { return [p.lat, p.lon]; });
+
+      currentLine = L.polyline(latlngs, { color: '#c8102e', weight: 4, opacity: 0.9 }).addTo(map);
+
+      const start = points[0];
+      const end = points[points.length - 1];
+      currentMarkers.push(
+        L.circleMarker([start.lat, start.lon], { radius: 7, color: '#166534', fillColor: '#22c55e', fillOpacity: 1, weight: 2 })
+          .addTo(map).bindPopup('Départ')
+      );
+      currentMarkers.push(
+        L.circleMarker([end.lat, end.lon], { radius: 7, color: '#991b1b', fillColor: '#ef4444', fillOpacity: 1, weight: 2 })
+          .addTo(map).bindPopup('Arrivée')
+      );
+
+      map.fitBounds(currentLine.getBounds(), { padding: [24, 24] });
+      document.getElementById('emptyOverlay').style.display = 'none';
+    }
+
+    // ========================================================================
+    // Lecture / parsing du fichier GPX (entièrement côté client, rien n'est envoyé au serveur)
+    // ========================================================================
+    function parseGpx_(xmlText) {
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(xmlText, 'application/xml');
+      if (xml.querySelector('parsererror')) {
+        throw new Error('Fichier GPX invalide (XML illisible).');
+      }
+
+      let nodes = Array.from(xml.getElementsByTagName('trkpt'));
+      if (nodes.length === 0) nodes = Array.from(xml.getElementsByTagName('rtept')); // secours : trace = itinéraire
+
+      const points = nodes.map(function (node) {
+        const lat = parseFloat(node.getAttribute('lat'));
+        const lon = parseFloat(node.getAttribute('lon'));
+        const eleNode = node.getElementsByTagName('ele')[0];
+        const timeNode = node.getElementsByTagName('time')[0];
+        return {
+          lat: lat,
+          lon: lon,
+          ele: eleNode ? parseFloat(eleNode.textContent) : null,
+          time: timeNode ? new Date(timeNode.textContent) : null
+        };
+      }).filter(function (p) { return isFinite(p.lat) && isFinite(p.lon); });
+
+      if (points.length === 0) {
+        throw new Error('Aucun point de trace trouvé dans ce fichier GPX.');
+      }
+      return points;
+    }
+
+    function haversineMeters_(a, b) {
+      const R = 6371000;
+      const toRad = function (d) { return d * Math.PI / 180; };
+      const dLat = toRad(b.lat - a.lat);
+      const dLon = toRad(b.lon - a.lon);
+      const h = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function computeStats_(points) {
+      let distance = 0, gain = 0, loss = 0;
+      for (let i = 1; i < points.length; i++) {
+        distance += haversineMeters_(points[i - 1], points[i]);
+        if (points[i].ele !== null && points[i - 1].ele !== null) {
+          const diff = points[i].ele - points[i - 1].ele;
+          if (diff > 0) gain += diff; else loss += -diff;
+        }
+      }
+      const first = points[0], last = points[points.length - 1];
+      const durationMs = (first.time && last.time) ? (last.time - first.time) : null;
+      return { distanceMeters: distance, elevationGain: gain, elevationLoss: loss, durationMs: durationMs };
+    }
+
+    function formatDistance_(meters) {
+      return meters >= 1000 ? (meters / 1000).toFixed(2) + ' km' : Math.round(meters) + ' m';
+    }
+
+    function formatDuration_(ms) {
+      const totalMin = Math.round(ms / 60000);
+      const h = Math.floor(totalMin / 60);
+      const min = totalMin % 60;
+      return h > 0 ? h + ' h ' + min + ' min' : min + ' min';
+    }
+
+    function renderStats_(stats) {
+      const el = document.getElementById('stats');
+      let html =
+        '<span class="stat">Distance <b>' + formatDistance_(stats.distanceMeters) + '</b></span>' +
+        '<span class="stat">D+ <b>' + Math.round(stats.elevationGain) + ' m</b></span>' +
+        '<span class="stat">D- <b>' + Math.round(stats.elevationLoss) + ' m</b></span>';
+      if (stats.durationMs !== null) {
+        html += '<span class="stat">Durée <b>' + formatDuration_(stats.durationMs) + '</b></span>';
+      }
+      el.innerHTML = html;
+      el.style.display = 'flex';
+    }
+
+    function showMessage_(text, type) {
+      const el = document.getElementById('message');
+      el.textContent = text;
+      el.className = type === 'info' ? 'info' : 'error';
+      el.style.display = text ? 'block' : 'none';
+    }
+
+    document.getElementById('gpxFile').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      showMessage_('');
+
+      if (!/\.gpx$/i.test(file.name)) {
+        showMessage_('Ce fichier ne semble pas être un .gpx (' + file.name + '). Sélectionne un fichier avec cette extension.', 'error');
+        document.getElementById('fileName').textContent = '';
+        document.getElementById('stats').style.display = 'none';
+        e.target.value = '';
+        return;
+      }
+      document.getElementById('fileName').textContent = file.name;
+
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const points = parseGpx_(reader.result);
+          const stats = computeStats_(points);
+          drawTrack_(points);
+          renderStats_(stats);
+        } catch (err) {
+          showMessage_(err.message || String(err), 'error');
+          document.getElementById('stats').style.display = 'none';
+        }
+      };
+      reader.onerror = function () {
+        showMessage_('Erreur de lecture du fichier.', 'error');
+      };
+      reader.readAsText(file);
+    });
+  </script>
+</body>
+</html>
