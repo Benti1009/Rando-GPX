@@ -128,8 +128,9 @@
     .regions-empty { font-size: 13px; color: #6b7280; text-align: center; padding: 24px 0; }
     .region-row {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      padding: 10px 0; border-bottom: 1px solid #f3f4f6;
+      padding: 10px 0; border-bottom: 1px solid #f3f4f6; cursor: pointer;
     }
+    .region-row:active { background: #f9fafb; }
     .region-info { display: flex; flex-direction: column; font-size: 13px; }
     .region-info span { font-size: 11px; color: #6b7280; margin-top: 2px; }
     .region-delete {
@@ -425,7 +426,9 @@
           name: currentGpxName || ('Zone du ' + new Date().toLocaleDateString('fr-FR')),
           createdAt: Date.now(),
           tileKeys: regionKeys,
-          sizeBytes: regionBytes
+          sizeBytes: regionBytes,
+          bounds: [[bounds.getSouth(), bounds.getWest()], [bounds.getNorth(), bounds.getEast()]],
+          gpxText: currentGpxText || null
         });
       }
 
@@ -452,9 +455,9 @@
       } else {
         listEl.innerHTML = regions.sort(function (a, b) { return b.createdAt - a.createdAt; }).map(function (r) {
           const d = new Date(r.createdAt).toLocaleDateString('fr-FR');
-          return '<div class="region-row">' +
+          return '<div class="region-row" data-id="' + r.id + '">' +
             '<div class="region-info"><b>' + escapeHtml_(r.name) + '</b>' +
-            '<span>' + d + ' · ' + formatBytes_(r.sizeBytes) + ' · ' + r.tileKeys.length + ' tuiles</span></div>' +
+            '<span>' + d + ' · ' + formatBytes_(r.sizeBytes) + ' · ' + r.tileKeys.length + ' tuiles' + (r.gpxText ? '' : ' · sans tracé') + '</span></div>' +
             '<button class="region-delete" data-id="' + r.id + '" aria-label="Supprimer cette carte">🗑️</button>' +
             '</div>';
         }).join('');
@@ -481,11 +484,36 @@
       if (e.target.id === 'regionsModal') e.currentTarget.hidden = true;
     });
     document.getElementById('regionsList').addEventListener('click', async function (e) {
-      const btn = e.target.closest('.region-delete');
-      if (!btn) return;
-      btn.disabled = true;
-      await deleteRegion_(btn.getAttribute('data-id'));
-      openRegionsModal_();
+      const delBtn = e.target.closest('.region-delete');
+      if (delBtn) {
+        delBtn.disabled = true;
+        await deleteRegion_(delBtn.getAttribute('data-id'));
+        openRegionsModal_();
+        return;
+      }
+      const row = e.target.closest('.region-row');
+      if (!row) return;
+      const regions = await listRegions_();
+      const region = regions.find(function (r) { return r.id === row.getAttribute('data-id'); });
+      if (!region) return;
+      document.getElementById('regionsModal').hidden = true;
+      if (region.gpxText) {
+        try {
+          const points = parseGpx_(region.gpxText);
+          const stats = computeStats_(points);
+          drawTrack_(points);
+          renderStats_(stats);
+          document.getElementById('fileName').textContent = region.name + '.gpx';
+          currentGpxName = region.name;
+          currentGpxText = region.gpxText;
+          showMessage_('');
+        } catch (err) {
+          showMessage_("Impossible de recharger le tracé de cette carte.", 'error');
+        }
+      } else if (region.bounds) {
+        map.fitBounds(region.bounds);
+        showMessage_('Zone affichée (cette carte avait été téléchargée sans tracé associé).', 'info');
+      }
     });
 
     // ========================================================================
@@ -535,6 +563,7 @@
     let currentLine = null;
     let currentMarkers = [];
     let currentGpxName = null;
+    let currentGpxText = null;
 
     function clearTrack_() {
       if (currentLine) { map.removeLayer(currentLine); currentLine = null; }
@@ -672,6 +701,7 @@
           const stats = computeStats_(points);
           drawTrack_(points);
           renderStats_(stats);
+          currentGpxText = reader.result;
         } catch (err) {
           showMessage_(err.message || String(err), 'error');
           document.getElementById('stats').style.display = 'none';
