@@ -192,6 +192,13 @@
         <button id="clearCacheBtn" class="file-btn danger" style="width: 100%; text-align: center;">
           🗑️ Vider le cache et recharger
         </button>
+        <p style="font-size: 13px; color: #6b7280; margin: 16px 0 12px;">
+          Supprime définitivement toutes les cartes hors-ligne (téléchargées ou mises en
+          cache en te baladant) et les tracés enregistrés avec elles. Irréversible.
+        </p>
+        <button id="clearAllDataBtn" class="file-btn danger" style="width: 100%; text-align: center;">
+          🗑️ Supprimer toutes les données
+        </button>
       </div>
     </div>
   </div>
@@ -213,7 +220,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.1';
+    const APP_VERSION = '1.11';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -614,6 +621,33 @@
       const url = new URL(location.href);
       url.searchParams.set('_v', Date.now().toString());
       location.href = url.toString();
+    });
+    document.getElementById('clearAllDataBtn').addEventListener('click', async function () {
+      if (!confirm('Supprimer TOUTES les cartes hors-ligne (téléchargées et mises en cache) ainsi que les tracés enregistrés avec elles ? Cette action est irréversible.')) return;
+
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Suppression…';
+
+      try {
+        if (tileDbPromise) {
+          try {
+            const db = await tileDbPromise;
+            db.close();
+          } catch (e) { /* déjà fermée ou jamais ouverte */ }
+          tileDbPromise = null;
+        }
+        await new Promise(function (resolve) {
+          const req = indexedDB.deleteDatabase(TILE_DB_NAME);
+          req.onsuccess = function () { resolve(); };
+          req.onerror = function () { resolve(); };
+          req.onblocked = function () { resolve(); };
+        });
+      } catch (e) {
+        console.warn('Échec de la suppression des données hors-ligne :', e);
+      }
+
+      location.reload();
     });
     document.getElementById('regionsModal').addEventListener('click', function (e) {
       if (e.target.id === 'regionsModal') e.currentTarget.hidden = true;
