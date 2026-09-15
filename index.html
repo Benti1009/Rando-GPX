@@ -390,12 +390,18 @@
       await Promise.all(runners);
     }
 
+    // Plage de zoom fixe téléchargée pour chaque région, indépendante du niveau
+    // de zoom affiché au moment du clic : l'objectif est de pouvoir zoomer sur
+    // tout le tracé une fois hors-ligne (mode avion), pas seulement autour de
+    // la vue du moment. 10 = vue d'ensemble large, 17 = niveau sentier détaillé.
+    const OFFLINE_MIN_ZOOM = 10;
+    const OFFLINE_MAX_ZOOM = 17;
+
     async function downloadOffline_() {
       const btn = document.getElementById('offlineBtn');
       const bounds = currentLine ? currentLine.getBounds().pad(0.15) : map.getBounds();
-      const baseZoom = map.getZoom();
-      const minZoom = Math.max(10, baseZoom - 1);
-      const maxZoom = Math.min(16, baseZoom + 3);
+      const minZoom = OFFLINE_MIN_ZOOM;
+      const maxZoom = OFFLINE_MAX_ZOOM;
 
       let allTiles = [];
       for (let z = minZoom; z <= maxZoom; z++) allTiles = allTiles.concat(tilesForBounds_(bounds, z));
@@ -407,8 +413,8 @@
         return true;
       });
 
-      if (allTiles.length > 1500) {
-        showMessage_('Zone trop grande pour un téléchargement hors-ligne (' + allTiles.length + ' tuiles). Zoome un peu avant de télécharger.', 'error');
+      if (allTiles.length > 6000) {
+        showMessage_('Ce tracé est trop long pour un téléchargement complet jusqu\'au niveau de détail sentier (' + allTiles.length + ' tuiles). Essaie avec un GPX plus court ou en plusieurs fois.', 'error');
         return;
       }
       if (allTiles.length === 0) return;
