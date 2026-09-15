@@ -47,11 +47,14 @@
 
     /* Bouton "Choisir un fichier" stylisé (l'input natif est masqué mais reste accessible) */
     #gpxFile { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-    label.file-btn {
+    .file-btn {
       background: var(--accent); color: #fff; font-weight: 600; font-size: 13px;
       padding: 9px 16px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+      border: none; display: inline-block;
     }
-    label.file-btn:active { background: var(--accent-dark); }
+    .file-btn:active { background: var(--accent-dark); }
+    .file-btn.danger { background: #dc2626; }
+    .file-btn.danger:active { background: #b91c1c; }
 
     #fileName { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -164,7 +167,27 @@
       <div class="map-fabs">
         <button id="gpsBtn" class="fab" title="Activer le suivi GPS" aria-label="Activer le suivi GPS">📍</button>
         <button id="offlineBtn" class="fab" title="Télécharger la carte pour usage hors-ligne" aria-label="Télécharger la carte pour usage hors-ligne">⬇️</button>
+        <button id="settingsBtn" class="fab" title="Paramètres" aria-label="Paramètres">⚙️</button>
         <button id="regionsBtn" class="fab" title="Mes cartes hors-ligne" aria-label="Mes cartes hors-ligne">🗂️</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>Paramètres</h2>
+        <button id="closeSettingsBtn" class="modal-close" aria-label="Fermer">✕</button>
+      </div>
+      <div style="padding: 0 16px 16px;">
+        <p style="font-size: 13px; color: #6b7280; margin: 0 0 12px;">
+          Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
+          pour forcer le téléchargement de la dernière version publiée. Tes cartes hors-ligne
+          téléchargées ne sont pas supprimées.
+        </p>
+        <button id="clearCacheBtn" class="file-btn danger" style="width: 100%; text-align: center;">
+          🗑️ Vider le cache et recharger
+        </button>
       </div>
     </div>
   </div>
@@ -479,6 +502,46 @@
     document.getElementById('regionsBtn').addEventListener('click', openRegionsModal_);
     document.getElementById('closeRegionsBtn').addEventListener('click', function () {
       document.getElementById('regionsModal').hidden = true;
+    });
+
+    // ========================================================================
+    // Panneau "Paramètres" : vidage du cache technique (pour tester une
+    // nouvelle version publiée sans passer par une désinstallation manuelle).
+    // Ne touche ni aux cartes hors-ligne (IndexedDB) ni aux tracés en cours :
+    // seuls le Service Worker et le Cache Storage (coquille HTML/JS/CSS) sont
+    // supprimés, puis la page est rechargée avec un paramètre anti-cache.
+    // ========================================================================
+    document.getElementById('settingsBtn').addEventListener('click', function () {
+      document.getElementById('settingsModal').hidden = false;
+    });
+    document.getElementById('closeSettingsBtn').addEventListener('click', function () {
+      document.getElementById('settingsModal').hidden = true;
+    });
+    document.getElementById('clearCacheBtn').addEventListener('click', async function () {
+      if (!confirm('Vider le cache technique et recharger la page ? Tes cartes hors-ligne téléchargées seront conservées.')) return;
+
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Nettoyage…';
+
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        }
+      } catch (e) {
+        console.warn('Échec du nettoyage du cache :', e);
+      }
+
+      // Cache-buster dans l'URL pour forcer le navigateur à re-télécharger
+      // index.html lui-même plutôt que de servir une copie en cache HTTP.
+      const url = new URL(location.href);
+      url.searchParams.set('_v', Date.now().toString());
+      location.href = url.toString();
     });
     document.getElementById('regionsModal').addEventListener('click', function (e) {
       if (e.target.id === 'regionsModal') e.currentTarget.hidden = true;
