@@ -43,6 +43,10 @@
       font-family: 'Barlow Condensed', -apple-system, sans-serif; font-weight: 700; font-size: 20px;
       margin: 0; color: #1f2430;
     }
+    .app-version {
+      font-family: -apple-system, sans-serif; font-weight: 500; font-size: 11px;
+      color: #9ca3af; vertical-align: middle;
+    }
     .top-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
     /* Bouton "Choisir un fichier" stylisé (l'input natif est masqué mais reste accessible) */
@@ -147,7 +151,7 @@
   <div id="app">
     <header>
       <div class="top-row">
-        <h1>Rando GPX</h1>
+        <h1>Rando GPX <span id="appVersion" class="app-version"></span></h1>
         <div style="display:flex; align-items:center; gap:10px;">
           <span id="fileName"></span>
           <label class="file-btn" for="gpxFile">Choisir un fichier</label>
@@ -204,6 +208,14 @@
   </div>
 
   <script>
+    // ========================================================================
+    // Numéro de version affiché à côté du titre — à incrémenter à chaque
+    // publication pour vérifier facilement (surtout après "Vider le cache")
+    // que la dernière version est bien chargée.
+    // ========================================================================
+    const APP_VERSION = '1.0';
+    document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
+
     // ========================================================================
     // Service Worker : permet à l'app de fonctionner même après une fermeture
     // complète et une réouverture sans réseau (mise en cache de la page elle-
@@ -334,10 +346,13 @@
       });
     }
 
-    // Calque de tuiles qui sert d'abord depuis le cache local si disponible (mode hors-ligne),
-    // et sinon charge normalement depuis le réseau comme un calque Leaflet classique. La mise
-    // en cache elle-même ne se fait que via le bouton de téléchargement (pas en arrière-plan
-    // à chaque tuile vue), pour rester prévisible en consommation de données.
+    // Calque de tuiles qui sert d'abord depuis le cache local si disponible (mode
+    // hors-ligne), et sinon charge depuis le réseau — comme un calque Leaflet
+    // classique, une seule requête par tuile affichée, sans rafale. Chaque tuile
+    // ainsi vue est mise en cache au passage : c'est cette navigation normale
+    // (zoomer/se balader sur le tracé pendant qu'on est connecté) qui alimente
+    // le mode hors-ligne, plutôt qu'un téléchargement en masse d'une zone qu'on
+    // ne regarde pas encore — ce que les serveurs OpenStreetMap bloquent.
     const OfflineTileLayer = L.TileLayer.extend({
       createTile: function (coords, done) {
         const img = document.createElement('img');
@@ -348,11 +363,24 @@
           if (blob) {
             img.src = URL.createObjectURL(blob);
             done(null, img);
-          } else {
+            return;
+          }
+          fetch(url).then(function (resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.blob();
+          }).then(function (fetchedBlob) {
+            if (!fetchedBlob || fetchedBlob.size === 0) throw new Error('tuile vide');
+            putCachedTile_(key, fetchedBlob).catch(function () { /* non bloquant */ });
+            img.onload = function () { done(null, img); };
+            img.onerror = function (e) { done(e, img); };
+            img.src = URL.createObjectURL(fetchedBlob);
+          }).catch(function () {
+            // fetch a échoué (hors-ligne, CORS, etc.) : on retombe sur un
+            // chargement <img> classique, juste sans mise en cache cette fois.
             img.onload = function () { done(null, img); };
             img.onerror = function (e) { done(e, img); };
             img.src = url;
-          }
+          });
         });
         return img;
       }
@@ -410,12 +438,15 @@
       return null;
     }
 
-    // Plage de zoom fixe téléchargée pour chaque région, indépendante du niveau
-    // de zoom affiché au moment du clic : l'objectif est de pouvoir zoomer sur
-    // tout le tracé une fois hors-ligne (mode avion), pas seulement autour de
-    // la vue du moment. 10 = vue d'ensemble large, 17 = niveau sentier détaillé.
+    // Plage de zoom du bouton "Télécharger hors-ligne" : volontairement modeste
+    // (10 à 14, vue d'ensemble à vue rapprochée) pour rester rapide et fiable —
+    // un petit nombre de tuiles, sans déclencher les protections anti bulk-
+    // download d'OpenStreetMap. Pour le niveau sentier détaillé (15-17), il
+    // suffit de se balader/zoomer normalement sur le tracé en étant connecté :
+    // chaque tuile vue est mise en cache automatiquement (voir OfflineTileLayer
+    // plus haut), exactement comme n'importe quelle consultation de carte.
     const OFFLINE_MIN_ZOOM = 10;
-    const OFFLINE_MAX_ZOOM = 17;
+    const OFFLINE_MAX_ZOOM = 14;
 
     async function downloadOffline_() {
       const btn = document.getElementById('offlineBtn');
@@ -433,8 +464,8 @@
         return true;
       });
 
-      if (allTiles.length > 6000) {
-        showMessage_('Ce tracé est trop long pour un téléchargement complet jusqu\'au niveau de détail sentier (' + allTiles.length + ' tuiles). Essaie avec un GPX plus court ou en plusieurs fois.', 'error');
+      if (allTiles.length > 2000) {
+        showMessage_('Ce tracé est trop long pour un téléchargement rapide (' + allTiles.length + ' tuiles). Zoome/balade-toi sur les portions qui t\'intéressent pendant que tu es connecté : chaque tuile vue est mise en cache automatiquement.', 'error');
         return;
       }
       if (allTiles.length === 0) return;
