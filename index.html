@@ -522,6 +522,32 @@
     // ========================================================================
     // Panneau "Mes cartes hors-ligne"
     // ========================================================================
+    // Calcule le poids réel de TOUTES les tuiles en cache (celles des cartes
+    // "téléchargées" via le bouton ⬇️, et aussi celles mises en cache en te
+    // baladant sur la carte pendant que tu es connecté) — utile pour savoir
+    // où on en est, indépendamment de la notion de "carte" nommée ci-dessous.
+    function getAllCachedTilesStats_() {
+      return openTileDb_().then(function (db) {
+        return new Promise(function (resolve) {
+          const tx = db.transaction(TILE_STORE, 'readonly');
+          const store = tx.objectStore(TILE_STORE);
+          let count = 0, bytes = 0;
+          const req = store.openCursor();
+          req.onsuccess = function (e) {
+            const cursor = e.target.result;
+            if (cursor) {
+              count++;
+              bytes += (cursor.value && cursor.value.size) || 0;
+              cursor.continue();
+            } else {
+              resolve({ count: count, bytes: bytes });
+            }
+          };
+          req.onerror = function () { resolve({ count: count, bytes: bytes }); };
+        });
+      }).catch(function () { return { count: 0, bytes: 0 }; });
+    }
+
     async function openRegionsModal_() {
       const regions = await listRegions_();
       const listEl = document.getElementById('regionsList');
@@ -540,16 +566,8 @@
         }).join('');
       }
 
-      const ownTotal = regions.reduce(function (s, r) { return s + r.sizeBytes; }, 0);
-      let totalLine = regions.length + ' carte(s) téléchargée(s) · ' + formatBytes_(ownTotal);
-      if (navigator.storage && navigator.storage.estimate) {
-        try {
-          const est = await navigator.storage.estimate();
-          if (est && est.usage) {
-            totalLine += ' — espace total utilisé par l\'app sur l\'appareil : ' + formatBytes_(est.usage);
-          }
-        } catch (e) { /* estimate() indisponible, on ignore */ }
-      }
+      const tileStats = await getAllCachedTilesStats_();
+      let totalLine = regions.length + ' carte(s) nommée(s) · ' + tileStats.count + ' tuile(s) en cache au total (' + formatBytes_(tileStats.bytes) + ')';
       totalEl.textContent = totalLine;
       document.getElementById('regionsModal').hidden = false;
     }
