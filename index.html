@@ -390,6 +390,26 @@
       await Promise.all(runners);
     }
 
+    function sleep_(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    // OpenStreetMap limite/bloque temporairement les clients qui envoient trop
+    // de requêtes en parallèle ou trop vite (politique anti bulk-download).
+    // On retente donc chaque tuile avec un court délai croissant avant de
+    // l'abandonner, plutôt que de la compter comme échouée dès le 1er raté.
+    async function fetchTileBlob_(url) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            if (blob && blob.size > 0) return blob;
+          }
+        } catch (e) { /* hors-ligne ou tuile temporairement refusée : on retente */ }
+        if (attempt < 2) await sleep_(500 * (attempt + 1));
+      }
+      return null;
+    }
+
     // Plage de zoom fixe téléchargée pour chaque région, indépendante du niveau
     // de zoom affiché au moment du clic : l'objectif est de pouvoir zoomer sur
     // tout le tracé une fois hors-ligne (mode avion), pas seulement autour de
@@ -433,21 +453,18 @@
           regionBytes += already.size || 0;
           cached++;
         } else {
-          try {
-            const resp = await fetch(tileLayer.getTileUrl({ x: t.x, y: t.y, z: t.z }));
-            if (resp.ok) {
-              const blob = await resp.blob();
-              await putCachedTile_(key, blob);
-              regionBytes += blob.size;
-              cached++;
-            } else failed++;
-          } catch (e) { failed++; }
+          const blob = await fetchTileBlob_(tileLayer.getTileUrl({ x: t.x, y: t.y, z: t.z }));
+          if (blob) {
+            await putCachedTile_(key, blob);
+            regionBytes += blob.size;
+            cached++;
+          } else failed++;
         }
         done++;
         if (done % 5 === 0 || done === allTiles.length) {
           showMessage_('Téléchargement hors-ligne : ' + done + ' / ' + allTiles.length + ' tuiles…' + (failed ? ' (' + failed + ' échecs)' : ''), 'info');
         }
-      }, 6);
+      }, 2);
 
       if (cached > 0) {
         await saveRegion_({
