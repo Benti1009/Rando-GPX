@@ -96,6 +96,18 @@
       display: flex; flex-direction: column; gap: 10px;
       z-index: 1000;
     }
+    /* Bandeau d'état affiché en direct pendant la mise en cache (manuelle ou
+       via le parcours automatique) : nombre de tuiles, poids, progression. */
+    .recording-status {
+      position: absolute;
+      top: max(10px, env(safe-area-inset-top));
+      left: 50%; transform: translateX(-50%);
+      background: rgba(31,36,48,0.88); color: #fff;
+      font-size: 12px; line-height: 1.4;
+      padding: 8px 14px; border-radius: 10px;
+      z-index: 1000; text-align: center; max-width: calc(100% - 32px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
     .fab {
       width: 46px; height: 46px; border-radius: 50%;
       background: #fff; border: 1px solid #e5e7eb;
@@ -168,9 +180,12 @@
     <div style="position:relative; flex:1; min-height:0;">
       <div id="map"></div>
       <div id="emptyOverlay"><span>Choisis un fichier .gpx pour afficher le tracé</span></div>
+      <div id="recordingStatus" class="recording-status" hidden>
+        <div id="recordingStatusText"></div>
+      </div>
       <div class="map-fabs">
         <button id="gpsBtn" class="fab" title="Activer le suivi GPS" aria-label="Activer le suivi GPS">📍</button>
-        <button id="offlineBtn" class="fab" title="Démarrer le téléchargement de cette carte en te baladant dessus" aria-label="Démarrer le téléchargement de cette carte en te baladant dessus">⬇️</button>
+        <button id="offlineBtn" class="fab" title="Démarrer le téléchargement automatique de cette carte" aria-label="Démarrer le téléchargement automatique de cette carte">⬇️</button>
         <button id="settingsBtn" class="fab" title="Paramètres" aria-label="Paramètres">⚙️</button>
         <button id="regionsBtn" class="fab" title="Mes cartes hors-ligne" aria-label="Mes cartes hors-ligne">🗂️</button>
       </div>
@@ -185,6 +200,14 @@
       </div>
       <div style="padding: 0 16px 16px;">
         <p style="font-size: 13px; color: #6b7280; margin: 0 0 12px;">
+          Demande au navigateur de protéger les cartes hors-ligne pour qu'il ne les efface
+          pas automatiquement en cas de manque de place. Sur certains navigateurs (Chrome,
+          Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.
+        </p>
+        <button id="persistStorageBtn" class="file-btn" style="width: 100%; text-align: center; background: #16a34a;">
+          🔒 Activer le stockage persistant
+        </button>
+        <p style="font-size: 13px; color: #6b7280; margin: 16px 0 12px;">
           Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
           pour forcer le téléchargement de la dernière version publiée. Tes cartes hors-ligne
           téléchargées ne sont pas supprimées.
@@ -221,7 +244,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.12';
+    const APP_VERSION = '1.13';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -231,13 +254,12 @@
     // navigateur peut effacer ces données sans prévenir en cas de besoin
     // d'espace. Le résultat (accordé ou non) est affiché dans "Mes cartes
     // hors-ligne". Sans effet si l'API n'est pas supportée par le navigateur.
+    //
+    // Important : Firefox exige que la demande soit déclenchée par une vraie
+    // interaction utilisateur (un clic), sinon elle est refusée sans même
+    // afficher de popup. On ne l'appelle donc PAS ici au chargement — voir le
+    // bouton "Activer le stockage persistant" dans Paramètres, plus bas.
     // ========================================================================
-    let storagePersisted = null;
-    if (navigator.storage && navigator.storage.persist) {
-      navigator.storage.persist().then(function (granted) {
-        storagePersisted = granted;
-      }).catch(function () { storagePersisted = null; });
-    }
 
     // ========================================================================
     // Service Worker : permet à l'app de fonctionner même après une fermeture
@@ -437,6 +459,27 @@
     // ========================================================================
     let recording = false;
     let recordingRegion = null;
+    let autoTourCancelled = false;
+    let autoTourRunning = false;
+
+    function sleep_(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    // Attend que les tuiles actuellement demandées par le calque aient fini de
+    // charger (évènement 'load' de Leaflet), avec une limite de sécurité au
+    // cas où l'évènement ne se déclencherait pas (tuile bloquée, etc.).
+    function waitForTilesLoaded_(timeoutMs) {
+      return new Promise(function (resolve) {
+        let done = false;
+        function finish() {
+          if (done) return;
+          done = true;
+          tileLayer.off('load', finish);
+          resolve();
+        }
+        tileLayer.on('load', finish);
+        setTimeout(finish, timeoutMs);
+      });
+    }
 
     function attributeTileToRecording_(key, blob) {
       if (!recording || !recordingRegion || !blob) return;
@@ -444,7 +487,22 @@
         recordingRegion.tileKeys.push(key);
         recordingRegion.sizeBytes += blob.size || 0;
         saveRegion_(recordingRegion).catch(function () { /* non bloquant */ });
+        updateRecordingStatus_();
       }
+    }
+
+    // Bandeau en direct au-dessus de la carte : nom de la carte en cours,
+    // nombre de tuiles déjà mises en cache et poids cumulé, + avancement du
+    // parcours automatique s'il est en cours. Se met à jour à chaque tuile.
+    function updateRecordingStatus_(progressText) {
+      const el = document.getElementById('recordingStatus');
+      const textEl = document.getElementById('recordingStatusText');
+      if (!recording || !recordingRegion) { el.hidden = true; return; }
+      let line = '⏺️ ' + escapeHtml_(recordingRegion.name) + ' — ' +
+        recordingRegion.tileKeys.length + ' tuile(s) · ' + formatBytes_(recordingRegion.sizeBytes);
+      if (progressText) line += '<br>' + progressText;
+      textEl.innerHTML = line;
+      el.hidden = false;
     }
 
     function updateRecordBtnUI_() {
@@ -457,8 +515,8 @@
       } else {
         btn.classList.remove('active');
         btn.textContent = '⬇️';
-        btn.title = 'Démarrer le téléchargement de cette carte en te baladant dessus';
-        btn.setAttribute('aria-label', 'Démarrer le téléchargement de cette carte en te baladant dessus');
+        btn.title = 'Démarrer le téléchargement automatique de cette carte';
+        btn.setAttribute('aria-label', 'Démarrer le téléchargement automatique de cette carte');
       }
     }
 
@@ -482,11 +540,13 @@
         gpxText: currentGpxText || null
       };
       recording = true;
-      showMessage_('Téléchargement démarré pour "' + recordingRegion.name + '" — balade-toi et zoome sur la carte pour mettre les tuiles en cache.', 'info');
       updateRecordBtnUI_();
+      updateRecordingStatus_();
+      runAutoTour_();
     }
 
     function stopRecording_() {
+      autoTourCancelled = true;
       const finishedName = recordingRegion ? recordingRegion.name : '';
       const finishedCount = recordingRegion ? recordingRegion.tileKeys.length : 0;
       const finishedBytes = recordingRegion ? recordingRegion.sizeBytes : 0;
@@ -494,6 +554,7 @@
       recordingRegion = null;
       showMessage_('Téléchargement arrêté pour "' + finishedName + '" (' + finishedCount + ' tuiles, ' + formatBytes_(finishedBytes) + ').', 'info');
       updateRecordBtnUI_();
+      updateRecordingStatus_();
     }
 
     // Change de tracé (nouveau fichier choisi, ou carte hors-ligne rouverte)
@@ -502,6 +563,71 @@
     // affichée.
     function stopRecordingIfActive_() {
       if (recording) stopRecording_();
+    }
+
+    // ========================================================================
+    // Parcours automatique : au démarrage de l'enregistrement, la carte se
+    // déplace toute seule le long du tracé, à plusieurs niveaux de zoom, en
+    // attendant que chaque vue soit chargée avant de passer à la suivante —
+    // exactement comme si tu te baladais toi-même, mais automatisé. Ça évite
+    // d'avoir à zoomer/déplacer la carte à la main sur tout le parcours.
+    // ========================================================================
+    const AUTO_TOUR_ZOOMS = [11, 13, 15, 16, 17];
+
+    async function runAutoTour_() {
+      if (!currentLine) return;
+      const latlngs = currentLine.getLatLngs();
+      if (!latlngs || latlngs.length === 0) return;
+
+      autoTourCancelled = false;
+      autoTourRunning = true;
+      const myRegionId = recordingRegion.id;
+
+      try {
+        for (let zi = 0; zi < AUTO_TOUR_ZOOMS.length; zi++) {
+          const zoom = AUTO_TOUR_ZOOMS[zi];
+
+          // Distance entre deux arrêts à ce niveau de zoom : environ 60% de la
+          // plus petite dimension de la vue, pour garder un léger recouvrement
+          // entre deux vues successives (évite les trous de couverture).
+          const size = map.getSize();
+          const centerLat = latlngs[Math.floor(latlngs.length / 2)].lat;
+          const metersPerPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180) / Math.pow(2, zoom);
+          const stepMeters = Math.max(50, Math.min(size.x, size.y) * 0.6 * metersPerPixel);
+
+          let dist = 0;
+          let nextStopAt = 0;
+          let stopIndex = 0;
+          const totalStops = Math.max(1, Math.ceil(estimateTrackLength_(latlngs) / stepMeters)) + 1;
+
+          for (let i = 0; i < latlngs.length; i++) {
+            if (autoTourCancelled || !recording || recordingRegion.id !== myRegionId) { autoTourRunning = false; return; }
+
+            if (i > 0) dist += latlngs[i - 1].distanceTo(latlngs[i]);
+
+            if (i === 0 || dist >= nextStopAt || i === latlngs.length - 1) {
+              stopIndex++;
+              nextStopAt = dist + stepMeters;
+              map.setView(latlngs[i], zoom, { animate: false });
+              updateRecordingStatus_('Balade automatique : zoom ' + zoom + ' (niveau ' + (zi + 1) + '/' + AUTO_TOUR_ZOOMS.length + ') · étape ' + Math.min(stopIndex, totalStops) + '/' + totalStops);
+              await waitForTilesLoaded_(4000);
+              await sleep_(150);
+            }
+          }
+        }
+        updateRecordingStatus_('Balade automatique terminée. Tu peux continuer à te balader manuellement, ou arrêter.');
+      } catch (e) {
+        console.warn('Erreur pendant la balade automatique :', e);
+      }
+      autoTourRunning = false;
+    }
+
+    // Longueur totale approximative d'une liste de points (mètres), utilisée
+    // uniquement pour estimer le nombre d'arrêts à afficher dans la progression.
+    function estimateTrackLength_(latlngs) {
+      let total = 0;
+      for (let i = 1; i < latlngs.length; i++) total += latlngs[i - 1].distanceTo(latlngs[i]);
+      return total;
     }
 
     // ========================================================================
@@ -555,10 +681,13 @@
       totalEl.textContent = totalLine;
 
       const persistEl = document.getElementById('storagePersistLine');
-      if (storagePersisted === true) {
-        persistEl.textContent = '✅ Stockage protégé : le navigateur ne supprimera pas ces données automatiquement.';
-      } else if (storagePersisted === false) {
-        persistEl.textContent = '⚠️ Stockage non protégé : le navigateur peut effacer ces données si l\'appareil manque de place et que l\'app n\'est pas utilisée depuis un moment.';
+      if (navigator.storage && navigator.storage.persisted) {
+        try {
+          const isPersisted = await navigator.storage.persisted();
+          persistEl.textContent = isPersisted
+            ? '✅ Stockage protégé : le navigateur ne supprimera pas ces données automatiquement.'
+            : '⚠️ Stockage non protégé — active-le dans Paramètres (⚙️) pour éviter que le navigateur les efface si l\'appareil manque de place.';
+        } catch (e) { persistEl.textContent = ''; }
       } else {
         persistEl.textContent = '';
       }
@@ -582,6 +711,26 @@
     });
     document.getElementById('closeSettingsBtn').addEventListener('click', function () {
       document.getElementById('settingsModal').hidden = true;
+    });
+    document.getElementById('persistStorageBtn').addEventListener('click', async function () {
+      const btn = this;
+      if (!(navigator.storage && navigator.storage.persist)) {
+        showMessage_('Ton navigateur ne supporte pas cette fonctionnalité.', 'error');
+        return;
+      }
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Demande en cours…';
+      try {
+        const granted = await navigator.storage.persist();
+        showMessage_(granted
+          ? '✅ Stockage persistant activé.'
+          : '⚠️ Non accordé pour l\'instant. Essaie d\'ajouter l\'app à l\'écran d\'accueil, puis réessaie.', granted ? 'info' : 'error');
+      } catch (e) {
+        showMessage_('Échec de la demande de stockage persistant.', 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = originalText;
     });
     document.getElementById('clearCacheBtn').addEventListener('click', async function () {
       if (!confirm('Vider le cache technique et recharger la page ? Tes cartes hors-ligne téléchargées seront conservées.')) return;
