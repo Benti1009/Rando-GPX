@@ -108,7 +108,14 @@
       bottom: max(16px, env(safe-area-inset-bottom));
       display: flex; flex-direction: column; gap: 10px;
       z-index: 1000;
+      transition: opacity 0.25s;
     }
+    /* Interface masquée (tap sur la carte) : ne garder que la carte à
+       l'écran, pratique en randonnée. Le bandeau du haut disparaît
+       complètement (la carte récupère sa place) et les boutons flottants
+       s'effacent en douceur. */
+    #app.ui-hidden header { display: none; }
+    #app.ui-hidden .map-fabs { opacity: 0; pointer-events: none; }
     /* Bandeau d'état affiché en direct pendant la mise en cache (manuelle ou
        via le parcours automatique) : nombre de tuiles, poids, progression. */
     .recording-status {
@@ -368,7 +375,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.23.0';
+    const APP_VERSION = '1.22.6';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -409,6 +416,38 @@
 
     // Échelle métrique affichée en bas à gauche de la carte.
     L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(map);
+
+    // ========================================================================
+    // Un tap simple sur la carte affiche/masque l'interface (bandeau du haut
+    // et boutons flottants), pour ne garder que la carte à l'écran pendant la
+    // randonnée. Un tap suffit pour la faire réapparaître. Un court délai
+    // permet de ne pas déclencher ce basculement lors d'un double-tap (zoom)
+    // ou d'un tap + glissé (zoom continu) : on attend de voir si un second
+    // tap rapproché arrive avant d'agir.
+    // ========================================================================
+    let uiHidden = false;
+    let pendingUiToggle = null;
+
+    function setUiHidden_(hidden) {
+      uiHidden = hidden;
+      document.getElementById('app').classList.toggle('ui-hidden', hidden);
+      setTimeout(function () { map.invalidateSize(); }, 60);
+    }
+
+    map.on('click', function () {
+      if (pendingUiToggle) {
+        // Second tap rapproché : c'était un double-tap, pas un tap simple —
+        // on annule le basculement prévu.
+        clearTimeout(pendingUiToggle);
+        pendingUiToggle = null;
+        return;
+      }
+      pendingUiToggle = setTimeout(function () {
+        pendingUiToggle = null;
+        setUiHidden_(!uiHidden);
+      }, 280);
+    });
+
 
     window.addEventListener('resize', function () { map.invalidateSize(); });
     setTimeout(function () { map.invalidateSize(); }, 300);
