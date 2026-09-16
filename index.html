@@ -170,7 +170,7 @@
       <div id="emptyOverlay"><span>Choisis un fichier .gpx pour afficher le tracé</span></div>
       <div class="map-fabs">
         <button id="gpsBtn" class="fab" title="Activer le suivi GPS" aria-label="Activer le suivi GPS">📍</button>
-        <button id="offlineBtn" class="fab" title="Télécharger la carte pour usage hors-ligne" aria-label="Télécharger la carte pour usage hors-ligne">⬇️</button>
+        <button id="offlineBtn" class="fab" title="Démarrer le téléchargement de cette carte en te baladant dessus" aria-label="Démarrer le téléchargement de cette carte en te baladant dessus">⬇️</button>
         <button id="settingsBtn" class="fab" title="Paramètres" aria-label="Paramètres">⚙️</button>
         <button id="regionsBtn" class="fab" title="Mes cartes hors-ligne" aria-label="Mes cartes hors-ligne">🗂️</button>
       </div>
@@ -210,6 +210,7 @@
         <button id="closeRegionsBtn" class="modal-close" aria-label="Fermer">✕</button>
       </div>
       <div id="regionsTotal" class="regions-total"></div>
+      <div id="storagePersistLine" class="regions-total"></div>
       <div id="regionsList" class="regions-list"></div>
     </div>
   </div>
@@ -220,8 +221,23 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.11';
+    const APP_VERSION = '1.12';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
+
+    // ========================================================================
+    // Stockage persistant : demande au navigateur de ne pas supprimer les
+    // données de l'app (tuiles + cartes hors-ligne en IndexedDB) pour libérer
+    // de la place si l'app n'est pas ouverte pendant un moment. Sans ça, un
+    // navigateur peut effacer ces données sans prévenir en cas de besoin
+    // d'espace. Le résultat (accordé ou non) est affiché dans "Mes cartes
+    // hors-ligne". Sans effet si l'API n'est pas supportée par le navigateur.
+    // ========================================================================
+    let storagePersisted = null;
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then(function (granted) {
+        storagePersisted = granted;
+      }).catch(function () { storagePersisted = null; });
+    }
 
     // ========================================================================
     // Service Worker : permet à l'app de fonctionner même après une fermeture
@@ -368,8 +384,18 @@
         const url = this.getTileUrl(coords);
         getCachedTile_(key).then(function (blob) {
           if (blob) {
+            attributeTileToRecording_(key, blob);
             img.src = URL.createObjectURL(blob);
             done(null, img);
+            return;
+          }
+          if (!recording) {
+            // Pas en cours d'enregistrement : simple affichage, sans mise en
+            // cache — c'est justement le but de l'interrupteur ⬇️/⏹️, pouvoir
+            // se balader sans faire grossir le stockage hors-ligne.
+            img.onload = function () { done(null, img); };
+            img.onerror = function (e) { done(e, img); };
+            img.src = url;
             return;
           }
           fetch(url).then(function (resp) {
@@ -378,6 +404,7 @@
           }).then(function (fetchedBlob) {
             if (!fetchedBlob || fetchedBlob.size === 0) throw new Error('tuile vide');
             putCachedTile_(key, fetchedBlob).catch(function () { /* non bloquant */ });
+            attributeTileToRecording_(key, fetchedBlob);
             img.onload = function () { done(null, img); };
             img.onerror = function (e) { done(e, img); };
             img.src = URL.createObjectURL(fetchedBlob);
@@ -398,141 +425,91 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
 
-    function lonToTileX_(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
-    function latToTileY_(lat, z) {
-      const rad = lat * Math.PI / 180;
-      return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, z));
-    }
-    function tilesForBounds_(bounds, zoom) {
-      const minX = lonToTileX_(bounds.getWest(), zoom), maxX = lonToTileX_(bounds.getEast(), zoom);
-      const minY = latToTileY_(bounds.getNorth(), zoom), maxY = latToTileY_(bounds.getSouth(), zoom);
-      const tiles = [];
-      for (let x = minX; x <= maxX; x++) {
-        for (let y = minY; y <= maxY; y++) tiles.push({ x: x, y: y, z: zoom });
+    // ========================================================================
+    // Enregistrement des tuiles hors-ligne, rattaché à la carte (le tracé GPX)
+    // actuellement chargée. Toujours inactif au démarrage de l'app, par
+    // sécurité — c'est toi qui décides quand ça commence et quand ça s'arrête.
+    // Pendant que c'est actif, chaque tuile affichée (déjà en cache ou
+    // fraîchement téléchargée) est rattachée à `recordingRegion`, ce qui
+    // permet de connaître le poids réel de cette carte précise. À chaque
+    // démarrage, une nouvelle carte est créée (pas de fusion automatique avec
+    // une carte précédente du même nom).
+    // ========================================================================
+    let recording = false;
+    let recordingRegion = null;
+
+    function attributeTileToRecording_(key, blob) {
+      if (!recording || !recordingRegion || !blob) return;
+      if (recordingRegion.tileKeys.indexOf(key) === -1) {
+        recordingRegion.tileKeys.push(key);
+        recordingRegion.sizeBytes += blob.size || 0;
+        saveRegion_(recordingRegion).catch(function () { /* non bloquant */ });
       }
-      return tiles;
-    }
-    async function processInBatches_(items, worker, concurrency) {
-      let idx = 0;
-      async function next() {
-        while (idx < items.length) {
-          const i = idx++;
-          await worker(items[i]);
-        }
-      }
-      const runners = [];
-      for (let i = 0; i < concurrency; i++) runners.push(next());
-      await Promise.all(runners);
     }
 
-    function sleep_(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-
-    // OpenStreetMap limite/bloque temporairement les clients qui envoient trop
-    // de requêtes en parallèle ou trop vite (politique anti bulk-download).
-    // On retente donc chaque tuile avec un court délai croissant avant de
-    // l'abandonner, plutôt que de la compter comme échouée dès le 1er raté.
-    async function fetchTileBlob_(url) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const resp = await fetch(url);
-          if (resp.ok) {
-            const blob = await resp.blob();
-            if (blob && blob.size > 0) return blob;
-          }
-        } catch (e) { /* hors-ligne ou tuile temporairement refusée : on retente */ }
-        if (attempt < 2) await sleep_(500 * (attempt + 1));
-      }
-      return null;
-    }
-
-    // Plage de zoom du bouton "Télécharger hors-ligne" : volontairement modeste
-    // (10 à 14, vue d'ensemble à vue rapprochée) pour rester rapide et fiable —
-    // un petit nombre de tuiles, sans déclencher les protections anti bulk-
-    // download d'OpenStreetMap. Pour le niveau sentier détaillé (15-17), il
-    // suffit de se balader/zoomer normalement sur le tracé en étant connecté :
-    // chaque tuile vue est mise en cache automatiquement (voir OfflineTileLayer
-    // plus haut), exactement comme n'importe quelle consultation de carte.
-    const OFFLINE_MIN_ZOOM = 10;
-    const OFFLINE_MAX_ZOOM = 14;
-
-    async function downloadOffline_() {
+    function updateRecordBtnUI_() {
       const btn = document.getElementById('offlineBtn');
-      const bounds = currentLine ? currentLine.getBounds().pad(0.15) : map.getBounds();
-      const minZoom = OFFLINE_MIN_ZOOM;
-      const maxZoom = OFFLINE_MAX_ZOOM;
+      if (recording) {
+        btn.classList.add('active');
+        btn.textContent = '⏹️';
+        btn.title = 'Arrêter le téléchargement de cette carte';
+        btn.setAttribute('aria-label', 'Arrêter le téléchargement de cette carte');
+      } else {
+        btn.classList.remove('active');
+        btn.textContent = '⬇️';
+        btn.title = 'Démarrer le téléchargement de cette carte en te baladant dessus';
+        btn.setAttribute('aria-label', 'Démarrer le téléchargement de cette carte en te baladant dessus');
+      }
+    }
 
-      let allTiles = [];
-      for (let z = minZoom; z <= maxZoom; z++) allTiles = allTiles.concat(tilesForBounds_(bounds, z));
-      const seen = new Set();
-      allTiles = allTiles.filter(function (t) {
-        const k = t.z + '/' + t.x + '/' + t.y;
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
+    document.getElementById('offlineBtn').addEventListener('click', function () {
+      if (!recording) startRecording_(); else stopRecording_();
+    });
 
-      if (allTiles.length > 2000) {
-        showMessage_('Ce tracé est trop long pour un téléchargement rapide (' + allTiles.length + ' tuiles). Zoome/balade-toi sur les portions qui t\'intéressent pendant que tu es connecté : chaque tuile vue est mise en cache automatiquement.', 'error');
+    function startRecording_() {
+      if (!currentLine) {
+        showMessage_('Charge d\'abord un fichier .gpx avant de démarrer le téléchargement.', 'error');
         return;
       }
-      if (allTiles.length === 0) return;
-
-      btn.disabled = true;
-      btn.classList.add('active');
-      let done = 0, cached = 0, failed = 0, regionBytes = 0;
-      const regionKeys = [];
-      showMessage_('Téléchargement hors-ligne : 0 / ' + allTiles.length + ' tuiles…', 'info');
-
-      await processInBatches_(allTiles, async function (t) {
-        const key = t.z + '/' + t.x + '/' + t.y;
-        regionKeys.push(key);
-        const already = await getCachedTile_(key);
-        if (already) {
-          regionBytes += already.size || 0;
-          cached++;
-        } else {
-          const blob = await fetchTileBlob_(tileLayer.getTileUrl({ x: t.x, y: t.y, z: t.z }));
-          if (blob) {
-            await putCachedTile_(key, blob);
-            regionBytes += blob.size;
-            cached++;
-          } else failed++;
-        }
-        done++;
-        if (done % 5 === 0 || done === allTiles.length) {
-          showMessage_('Téléchargement hors-ligne : ' + done + ' / ' + allTiles.length + ' tuiles…' + (failed ? ' (' + failed + ' échecs)' : ''), 'info');
-        }
-      }, 2);
-
-      if (cached > 0) {
-        await saveRegion_({
-          id: 'r' + Date.now(),
-          name: currentGpxName || ('Zone du ' + new Date().toLocaleDateString('fr-FR')),
-          createdAt: Date.now(),
-          tileKeys: regionKeys,
-          sizeBytes: regionBytes,
-          bounds: [[bounds.getSouth(), bounds.getWest()], [bounds.getNorth(), bounds.getEast()]],
-          gpxText: currentGpxText || null
-        });
-      }
-
-      btn.disabled = false;
-      btn.classList.remove('active');
-      if (cached === 0) {
-        showMessage_("Le téléchargement a échoué. Vérifie ta connexion et réessaie (idéalement en Wi-Fi).", 'error');
-      } else {
-        showMessage_('Zone "' + (currentGpxName || 'sans nom') + '" disponible hors-ligne (' + formatBytes_(regionBytes) + (failed ? ', ' + failed + ' tuiles non disponibles' : '') + ').', 'info');
-      }
+      const b = currentLine.getBounds();
+      recordingRegion = {
+        id: 'r' + Date.now(),
+        name: currentGpxName || ('Zone du ' + new Date().toLocaleDateString('fr-FR')),
+        createdAt: Date.now(),
+        tileKeys: [],
+        sizeBytes: 0,
+        bounds: [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]],
+        gpxText: currentGpxText || null
+      };
+      recording = true;
+      showMessage_('Téléchargement démarré pour "' + recordingRegion.name + '" — balade-toi et zoome sur la carte pour mettre les tuiles en cache.', 'info');
+      updateRecordBtnUI_();
     }
-    document.getElementById('offlineBtn').addEventListener('click', downloadOffline_);
+
+    function stopRecording_() {
+      const finishedName = recordingRegion ? recordingRegion.name : '';
+      const finishedCount = recordingRegion ? recordingRegion.tileKeys.length : 0;
+      const finishedBytes = recordingRegion ? recordingRegion.sizeBytes : 0;
+      recording = false;
+      recordingRegion = null;
+      showMessage_('Téléchargement arrêté pour "' + finishedName + '" (' + finishedCount + ' tuiles, ' + formatBytes_(finishedBytes) + ').', 'info');
+      updateRecordBtnUI_();
+    }
+
+    // Change de tracé (nouveau fichier choisi, ou carte hors-ligne rouverte)
+    // pendant qu'un enregistrement est en cours : on l'arrête proprement plutôt
+    // que de continuer à rattacher des tuiles à une carte qui n'est plus
+    // affichée.
+    function stopRecordingIfActive_() {
+      if (recording) stopRecording_();
+    }
 
     // ========================================================================
     // Panneau "Mes cartes hors-ligne"
     // ========================================================================
-    // Calcule le poids réel de TOUTES les tuiles en cache (celles des cartes
-    // "téléchargées" via le bouton ⬇️, et aussi celles mises en cache en te
-    // baladant sur la carte pendant que tu es connecté) — utile pour savoir
-    // où on en est, indépendamment de la notion de "carte" nommée ci-dessous.
+    // Calcule le poids réel de TOUTES les tuiles en cache (celles rattachées à
+    // une carte via l'enregistrement, et aussi d'éventuelles tuiles orphelines)
+    // — utile pour savoir où on en est, indépendamment du détail par carte.
     function getAllCachedTilesStats_() {
       return openTileDb_().then(function (db) {
         return new Promise(function (resolve) {
@@ -576,6 +553,16 @@
       const tileStats = await getAllCachedTilesStats_();
       let totalLine = regions.length + ' carte(s) nommée(s) · ' + tileStats.count + ' tuile(s) en cache au total (' + formatBytes_(tileStats.bytes) + ')';
       totalEl.textContent = totalLine;
+
+      const persistEl = document.getElementById('storagePersistLine');
+      if (storagePersisted === true) {
+        persistEl.textContent = '✅ Stockage protégé : le navigateur ne supprimera pas ces données automatiquement.';
+      } else if (storagePersisted === false) {
+        persistEl.textContent = '⚠️ Stockage non protégé : le navigateur peut effacer ces données si l\'appareil manque de place et que l\'app n\'est pas utilisée depuis un moment.';
+      } else {
+        persistEl.textContent = '';
+      }
+
       document.getElementById('regionsModal').hidden = false;
     }
     document.getElementById('regionsBtn').addEventListener('click', openRegionsModal_);
@@ -741,6 +728,7 @@
     }
 
     function drawTrack_(points) {
+      stopRecordingIfActive_();
       clearTrack_();
       const latlngs = points.map(function (p) { return [p.lat, p.lon]; });
 
