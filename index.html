@@ -135,15 +135,14 @@
     /* Modale "Mes cartes hors-ligne" */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-      display: flex; align-items: flex-end; justify-content: center;
-      z-index: 2000;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 2000; padding: 24px;
     }
     .modal-overlay[hidden] { display: none; }
     .modal-box {
       background: #fff; width: 100%; max-width: 480px;
-      border-radius: 16px 16px 0 0; max-height: 75vh;
+      border-radius: 16px; max-height: 85vh;
       display: flex; flex-direction: column;
-      padding-bottom: env(safe-area-inset-bottom);
     }
     .modal-header {
       display: flex; align-items: center; justify-content: space-between;
@@ -155,6 +154,7 @@
       width: 32px; height: 32px; border-radius: 50%;
     }
     .modal-close:active { background: #f3f4f6; }
+
     .regions-total { font-size: 12px; color: #6b7280; padding: 0 16px 12px; }
     .regions-list { overflow-y: auto; padding: 0 16px 16px; }
     .regions-empty { font-size: 13px; color: #6b7280; text-align: center; padding: 24px 0; }
@@ -176,6 +176,28 @@
       width: 36px; height: 36px; border-radius: 50%;
     }
     .region-delete:active { background: #fef2f2; }
+
+    .help-btn {
+      display: flex; align-items: center; gap: 5px;
+      background: none; border: none; cursor: pointer; padding: 0;
+      font-size: 12px; color: #2563eb; font-family: inherit; font-weight: 600;
+    }
+    .help-btn:active { opacity: 0.7; }
+    .help-btn-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #2563eb; color: #fff;
+      font-size: 12px; font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .help-content { overflow-y: auto; padding: 0 16px 16px; font-size: 13px; color: #374151; }
+    .help-content h3 {
+      font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700;
+      color: #1f2430; margin: 16px 0 4px;
+    }
+    .help-content h3:first-child { margin-top: 0; }
+    .help-content p { margin: 0 0 8px; line-height: 1.4; }
 
     /* Fine ligne de séparation entre un contrôle de Paramètres et son explication */
     .setting-divider { border: none; border-top: 2px solid #d1d5db; margin: 8px 0; }
@@ -212,7 +234,7 @@
 
     <div style="position:relative; flex:1; min-height:0;">
       <div id="map"></div>
-      <div id="emptyOverlay"><span>Choisis un fichier .gpx pour afficher le tracé</span></div>
+      <div id="emptyOverlay"><span>Choisir un fichier .gpx pour afficher le tracé</span></div>
       <div id="recordingStatus" class="recording-status" hidden>
         <div id="recordingStatusText"></div>
       </div>
@@ -229,7 +251,12 @@
     <div class="modal-box">
       <div class="modal-header">
         <h2>Paramètres</h2>
-        <button id="closeSettingsBtn" class="modal-close" aria-label="Fermer">✕</button>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button id="showHelpBtn" class="help-btn" aria-label="Aide">
+            <span class="help-btn-icon">i</span> Aide
+          </button>
+          <button id="closeSettingsBtn" class="modal-close" aria-label="Fermer">✕</button>
+        </div>
       </div>
       <div style="padding: 0 16px 16px;">
         <select id="offlineBasemapSelect" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 14px; font-family: inherit; margin-bottom: 8px; background: #fff;">
@@ -257,7 +284,7 @@
         </button>
         <p style="font-size: 13px; color: #6b7280; margin: 8px 0 0;">
           Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
-          pour forcer le téléchargement de la dernière version publiée. Tes cartes hors-ligne
+          pour forcer le téléchargement de la dernière version publiée. Vos cartes hors-ligne
           téléchargées ne sont pas supprimées.
         </p>
         <hr class="setting-divider">
@@ -284,13 +311,64 @@
     </div>
   </div>
 
+  <div id="helpModal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>Comment fonctionne l'appli</h2>
+        <button id="closeHelpBtn" class="modal-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="help-content">
+        <h3>Charger un tracé</h3>
+        <p><b>Choisir un fichier</b> (en haut) ouvre un fichier .gpx enregistré sur l'appareil et
+        affiche le tracé sur la carte, avec la distance, le D+/D- et la durée si disponible.</p>
+
+        <h3>Les boutons flottants sur la carte</h3>
+        <p><b>📍 GPS</b> — active/désactive le suivi de la position en direct (point bleu). La
+        carte se recentre une fois sur cette position au premier signal.</p>
+        <p><b>⬇️ Téléchargement hors-ligne</b> — démarre l'enregistrement automatique des images
+        de carte (« tuiles ») le long du tracé actuellement affiché, à plusieurs niveaux de zoom,
+        pour pouvoir consulter cette carte plus tard sans connexion. La carte se déplace toute
+        seule le long du parcours pendant l'enregistrement (« balade automatique ») ; appuie sur
+        <b>⏹️</b> pour l'arrêter à tout moment. Un bandeau en haut affiche la progression. Il faut
+        d'abord avoir chargé un fichier .gpx, et être sur le fond de carte de référence choisi
+        dans Paramètres (le bouton est grisé sinon).</p>
+        <p><b>⚙️ Paramètres</b> — réglages de l'appli (voir plus bas).</p>
+        <p><b>🗂️ Mes cartes hors-ligne</b> — liste des cartes déjà téléchargées : nom, date, fond
+        utilisé, poids et nombre de tuiles. Toucher une carte recharge son tracé (si elle en a
+        un) ou centre la vue dessus. Chaque carte peut être renommée (✏️) ou supprimée (🗑️).</p>
+
+        <h3>Fonds de carte</h3>
+        <p>Le sélecteur de calques en haut à droite de la carte permet de changer de fond
+        (OpenStreetMap, IGN, OpenTopoMap). Seul le fond choisi comme référence dans Paramètres
+        est mis en cache hors-ligne ; les autres nécessitent une connexion.</p>
+
+        <h3>Échelle</h3>
+        <p>La barre en bas à gauche de la carte indique l'échelle (distance réelle) selon le
+        niveau de zoom actuel.</p>
+
+        <h3>Paramètres (⚙️)</h3>
+        <p><b>Fond hors-ligne</b> — choisit quel fond de carte est mis en cache par le bouton ⬇️.</p>
+        <p><b>Stockage persistant</b> — demande au navigateur de ne pas effacer automatiquement
+        les cartes téléchargées en cas de manque de place.</p>
+        <p><b>Vider le cache et recharger</b> — force le téléchargement de la dernière version de
+        l'appli, sans toucher aux cartes hors-ligne déjà téléchargées.</p>
+        <p><b>Supprimer toutes les données</b> — efface définitivement toutes les cartes
+        hors-ligne et les tracés enregistrés avec elles.</p>
+
+        <h3>Fonctionnement hors réseau</h3>
+        <p>Une fois installée sur l'écran d'accueil, l'appli se recharge même sans connexion, et
+        les cartes téléchargées restent consultables (tracé, tuiles, GPS) sans réseau.</p>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ========================================================================
     // Numéro de version affiché à côté du titre — à incrémenter à chaque
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.22.1';
+    const APP_VERSION = '1.22.5';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -570,7 +648,7 @@
     // ========================================================================
     // Enregistrement des tuiles hors-ligne, rattaché à la carte (le tracé GPX)
     // actuellement chargée. Toujours inactif au démarrage de l'app, par
-    // sécurité — c'est toi qui décides quand ça commence et quand ça s'arrête.
+    // sécurité — c'est à l'utilisateur de décider quand ça commence et quand ça s'arrête.
     // Pendant que c'est actif, chaque tuile affichée (déjà en cache ou
     // fraîchement téléchargée) est rattachée à `recordingRegion`, ce qui
     // permet de connaître le poids réel de cette carte précise. À chaque
@@ -650,7 +728,7 @@
       const onReferenceBasemap = (activeBasemapId === offlineBasemapId);
       btn.disabled = !onReferenceBasemap;
       if (!onReferenceBasemap) {
-        btn.title = 'Bascule sur le fond "' + basemapLabel_(offlineBasemapId) + '" pour télécharger hors-ligne (réglable dans Paramètres)';
+        btn.title = 'Basculer sur le fond "' + basemapLabel_(offlineBasemapId) + '" pour télécharger hors-ligne (réglable dans Paramètres)';
         btn.setAttribute('aria-label', btn.title);
       } else {
         btn.title = 'Démarrer le téléchargement automatique de cette carte';
@@ -669,7 +747,7 @@
         return;
       }
       if (!currentLine) {
-        showMessage_('Charge d\'abord un fichier .gpx avant de démarrer le téléchargement.', 'error');
+        showMessage_('Charger d\'abord un fichier .gpx avant de démarrer le téléchargement.', 'error');
         return;
       }
       const b = currentLine.getBounds();
@@ -715,7 +793,7 @@
     // Parcours automatique : au démarrage de l'enregistrement, la carte se
     // déplace toute seule le long du tracé, à plusieurs niveaux de zoom, en
     // attendant que chaque vue soit chargée avant de passer à la suivante —
-    // exactement comme si tu te baladais toi-même, mais automatisé. Ça évite
+    // exactement comme lors d'une balade manuelle, mais automatisé. Ça évite
     // d'avoir à zoomer/déplacer la carte à la main sur tout le parcours.
     // ========================================================================
     const AUTO_TOUR_ZOOMS = [11, 13, 15, 16, 17];
@@ -761,7 +839,7 @@
             }
           }
         }
-        updateRecordingStatus_('Balade automatique terminée. Tu peux continuer à te balader manuellement, ou arrêter.');
+        updateRecordingStatus_('Balade automatique terminée. Vous pouvez continuer à vous balader manuellement, ou arrêter.');
       } catch (e) {
         console.warn('Erreur pendant la balade automatique :', e);
       }
@@ -835,7 +913,7 @@
           const isPersisted = await navigator.storage.persisted();
           persistEl.textContent = isPersisted
             ? '✅ Stockage protégé : le navigateur ne supprimera pas ces données automatiquement.'
-            : '⚠️ Stockage non protégé — active-le dans Paramètres (⚙️) pour éviter que le navigateur les efface si l\'appareil manque de place.';
+            : '⚠️ Stockage non protégé — l\'activer dans Paramètres (⚙️) pour éviter que le navigateur ne les efface si l\'appareil manque de place.';
         } catch (e) { persistEl.textContent = ''; }
       } else {
         persistEl.textContent = '';
@@ -880,10 +958,22 @@
     document.getElementById('closeSettingsBtn').addEventListener('click', function () {
       document.getElementById('settingsModal').hidden = true;
     });
+    document.getElementById('settingsModal').addEventListener('click', function (e) {
+      if (e.target.id === 'settingsModal') e.currentTarget.hidden = true;
+    });
+    document.getElementById('showHelpBtn').addEventListener('click', function () {
+      document.getElementById('helpModal').hidden = false;
+    });
+    document.getElementById('closeHelpBtn').addEventListener('click', function () {
+      document.getElementById('helpModal').hidden = true;
+    });
+    document.getElementById('helpModal').addEventListener('click', function (e) {
+      if (e.target.id === 'helpModal') e.currentTarget.hidden = true;
+    });
     document.getElementById('persistStorageBtn').addEventListener('click', async function () {
       const btn = this;
       if (!(navigator.storage && navigator.storage.persist)) {
-        showMessage_('Ton navigateur ne supporte pas cette fonctionnalité.', 'error');
+        showMessage_('Votre navigateur ne supporte pas cette fonctionnalité.', 'error');
         return;
       }
       btn.disabled = true;
@@ -893,7 +983,7 @@
         const granted = await navigator.storage.persist();
         showMessage_(granted
           ? '✅ Stockage persistant activé.'
-          : '⚠️ Non accordé pour l\'instant. Essaie d\'ajouter l\'app à l\'écran d\'accueil, puis réessaie.', granted ? 'info' : 'error');
+          : '⚠️ Non accordé pour l\'instant. Essayer d\'ajouter l\'app à l\'écran d\'accueil, puis réessayer.', granted ? 'info' : 'error');
       } catch (e) {
         showMessage_('Échec de la demande de stockage persistant.', 'error');
       }
@@ -901,7 +991,7 @@
       btn.textContent = originalText;
     });
     document.getElementById('clearCacheBtn').addEventListener('click', async function () {
-      if (!confirm('Vider le cache technique et recharger la page ? Tes cartes hors-ligne téléchargées seront conservées.')) return;
+      if (!confirm('Vider le cache technique et recharger la page ? Vos cartes hors-ligne téléchargées seront conservées.')) return;
 
       const btn = this;
       btn.disabled = true;
@@ -1177,7 +1267,7 @@
       showMessage_('');
 
       if (!/\.gpx$/i.test(file.name)) {
-        showMessage_('Ce fichier ne semble pas être un .gpx (' + file.name + '). Sélectionne un fichier avec cette extension.', 'error');
+        showMessage_('Ce fichier ne semble pas être un .gpx (' + file.name + '). Sélectionner un fichier avec cette extension.', 'error');
         document.getElementById('fileName').textContent = '';
         document.getElementById('stats').style.display = 'none';
         e.target.value = '';
