@@ -199,6 +199,16 @@
         <button id="closeSettingsBtn" class="modal-close" aria-label="Fermer">✕</button>
       </div>
       <div style="padding: 0 16px 16px;">
+        <p style="font-size: 13px; color: #6b7280; margin: 0 0 8px;">
+          Fond de carte utilisé pour les téléchargements hors-ligne (bouton ⬇️). Les autres
+          fonds restent consultables uniquement avec une connexion. Changer ce réglage
+          recharge l'application.
+        </p>
+        <select id="offlineBasemapSelect" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 14px; font-family: inherit; margin-bottom: 16px; background: #fff;">
+          <option value="osm">OpenStreetMap</option>
+          <option value="ign">IGN (Plan IGN)</option>
+          <option value="opentopo">OpenTopoMap</option>
+        </select>
         <p style="font-size: 13px; color: #6b7280; margin: 0 0 12px;">
           Demande au navigateur de protéger les cartes hors-ligne pour qu'il ne les efface
           pas automatiquement en cas de manque de place. Sur certains navigateurs (Chrome,
@@ -244,7 +254,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.13';
+    const APP_VERSION = '1.14';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -282,6 +292,49 @@
 
     window.addEventListener('resize', function () { map.invalidateSize(); });
     setTimeout(function () { map.invalidateSize(); }, 300);
+
+    // ========================================================================
+    // Fonds de carte disponibles. Un seul d'entre eux (celui choisi dans
+    // Paramètres, "OFFLINE_BASEMAP_KEY") est mis en cache hors-ligne — les
+    // autres restent consultables uniquement avec connexion. Ce choix est lu
+    // une fois au chargement ; le changer dans Paramètres recharge la page.
+    // ========================================================================
+    const BASEMAPS = {
+      osm: {
+        label: 'OpenStreetMap',
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        options: { maxZoom: 19, subdomains: 'abc', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }
+      },
+      ign: {
+        label: 'IGN (Plan IGN)',
+        // Service Géoplateforme de l'IGN, ouvert et sans clé depuis 2024.
+        url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+        options: { maxZoom: 19, minZoom: 0, attribution: '&copy; <a href="https://www.ign.fr">IGN-F/Géoportail</a>' }
+      },
+      opentopo: {
+        label: 'OpenTopoMap',
+        url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+        options: { maxZoom: 17, subdomains: 'abc', attribution: 'Données : &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | Rendu : &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)' }
+      }
+    };
+    const DEFAULT_BASEMAP_ID = 'osm';
+    const OFFLINE_BASEMAP_KEY = 'randoGpx_offlineBasemap';
+    const ACTIVE_BASEMAP_KEY = 'randoGpx_activeBasemap';
+
+    function getOfflineBasemapId_() {
+      const v = localStorage.getItem(OFFLINE_BASEMAP_KEY);
+      return BASEMAPS[v] ? v : DEFAULT_BASEMAP_ID;
+    }
+    function getActiveBasemapId_() {
+      const v = localStorage.getItem(ACTIVE_BASEMAP_KEY);
+      return BASEMAPS[v] ? v : getOfflineBasemapId_();
+    }
+    function basemapLabel_(id) {
+      return (BASEMAPS[id] && BASEMAPS[id].label) || BASEMAPS[DEFAULT_BASEMAP_ID].label;
+    }
+
+    const offlineBasemapId = getOfflineBasemapId_();
+    let activeBasemapId = getActiveBasemapId_();
 
     // ========================================================================
     // Cache hors-ligne des tuiles (IndexedDB) + calque personnalisé qui l'utilise
@@ -402,7 +455,9 @@
       createTile: function (coords, done) {
         const img = document.createElement('img');
         img.alt = '';
-        const key = coords.z + '/' + coords.x + '/' + coords.y;
+        // Préfixé par le fond (cacheId) pour ne jamais mélanger les tuiles de
+        // deux fonds différents si le fond de référence hors-ligne change un jour.
+        const key = this.options.cacheId + '/' + coords.z + '/' + coords.x + '/' + coords.y;
         const url = this.getTileUrl(coords);
         getCachedTile_(key).then(function (blob) {
           if (blob) {
@@ -442,10 +497,36 @@
       }
     });
 
-    const tileLayer = new OfflineTileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-    }).addTo(map);
+    // Le fond de référence hors-ligne utilise OfflineTileLayer (cache IndexedDB) ;
+    // les autres sont des calques Leaflet classiques, toujours en ligne.
+    let tileLayer = null; // référence vers le calque hors-ligne (celui de offlineBasemapId)
+    const basemapLayers = {};
+    const basemapLayersByLabel = {};
+    Object.keys(BASEMAPS).forEach(function (id) {
+      const cfg = BASEMAPS[id];
+      let layer;
+      if (id === offlineBasemapId) {
+        layer = new OfflineTileLayer(cfg.url, Object.assign({}, cfg.options, { cacheId: id }));
+        tileLayer = layer;
+      } else {
+        layer = L.tileLayer(cfg.url, cfg.options);
+      }
+      basemapLayers[id] = layer;
+      basemapLayersByLabel[cfg.label] = layer;
+    });
+    basemapLayers[activeBasemapId].addTo(map);
+    L.control.layers(basemapLayersByLabel, null, { position: 'topright' }).addTo(map);
+
+    map.on('baselayerchange', function (e) {
+      const newId = Object.keys(basemapLayers).find(function (id) { return basemapLayers[id] === e.layer; });
+      if (!newId) return;
+      if (newId !== activeBasemapId && recording) {
+        stopRecordingIfActive_();
+      }
+      activeBasemapId = newId;
+      localStorage.setItem(ACTIVE_BASEMAP_KEY, activeBasemapId);
+      updateOfflineButtonAvailability_();
+    });
 
     // ========================================================================
     // Enregistrement des tuiles hors-ligne, rattaché à la carte (le tracé GPX)
@@ -520,11 +601,34 @@
       }
     }
 
+    // Le téléchargement hors-ligne n'est possible que sur le fond de
+    // référence configuré dans Paramètres (voir offlineBasemapId) — les
+    // autres fonds ne sont jamais mis en cache. Le bouton est désactivé et
+    // son titre explique pourquoi tant qu'on n'est pas sur ce fond-là.
+    function updateOfflineButtonAvailability_() {
+      const btn = document.getElementById('offlineBtn');
+      if (recording) return; // ne pas gêner un enregistrement déjà en cours
+      const onReferenceBasemap = (activeBasemapId === offlineBasemapId);
+      btn.disabled = !onReferenceBasemap;
+      if (!onReferenceBasemap) {
+        btn.title = 'Bascule sur le fond "' + basemapLabel_(offlineBasemapId) + '" pour télécharger hors-ligne (réglable dans Paramètres)';
+        btn.setAttribute('aria-label', btn.title);
+      } else {
+        btn.title = 'Démarrer le téléchargement automatique de cette carte';
+        btn.setAttribute('aria-label', 'Démarrer le téléchargement automatique de cette carte');
+      }
+    }
+    updateOfflineButtonAvailability_();
+
     document.getElementById('offlineBtn').addEventListener('click', function () {
       if (!recording) startRecording_(); else stopRecording_();
     });
 
     function startRecording_() {
+      if (activeBasemapId !== offlineBasemapId) {
+        showMessage_('Le téléchargement hors-ligne fonctionne uniquement sur le fond "' + basemapLabel_(offlineBasemapId) + '" (réglable dans Paramètres).', 'error');
+        return;
+      }
       if (!currentLine) {
         showMessage_('Charge d\'abord un fichier .gpx avant de démarrer le téléchargement.', 'error');
         return;
@@ -537,10 +641,12 @@
         tileKeys: [],
         sizeBytes: 0,
         bounds: [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]],
-        gpxText: currentGpxText || null
+        gpxText: currentGpxText || null,
+        basemapId: offlineBasemapId
       };
       recording = true;
       updateRecordBtnUI_();
+      updateOfflineButtonAvailability_();
       updateRecordingStatus_();
       runAutoTour_();
     }
@@ -554,6 +660,7 @@
       recordingRegion = null;
       showMessage_('Téléchargement arrêté pour "' + finishedName + '" (' + finishedCount + ' tuiles, ' + formatBytes_(finishedBytes) + ').', 'info');
       updateRecordBtnUI_();
+      updateOfflineButtonAvailability_();
       updateRecordingStatus_();
     }
 
@@ -670,7 +777,7 @@
           const d = new Date(r.createdAt).toLocaleDateString('fr-FR');
           return '<div class="region-row" data-id="' + r.id + '">' +
             '<div class="region-info"><b>' + escapeHtml_(r.name) + '</b>' +
-            '<span>' + d + ' · ' + formatBytes_(r.sizeBytes) + ' · ' + r.tileKeys.length + ' tuiles' + (r.gpxText ? '' : ' · sans tracé') + '</span></div>' +
+            '<span>' + d + ' · ' + basemapLabel_(r.basemapId) + ' · ' + formatBytes_(r.sizeBytes) + ' · ' + r.tileKeys.length + ' tuiles' + (r.gpxText ? '' : ' · sans tracé') + '</span></div>' +
             '<button class="region-delete" data-id="' + r.id + '" aria-label="Supprimer cette carte">🗑️</button>' +
             '</div>';
         }).join('');
@@ -706,6 +813,25 @@
     // seuls le Service Worker et le Cache Storage (coquille HTML/JS/CSS) sont
     // supprimés, puis la page est rechargée avec un paramètre anti-cache.
     // ========================================================================
+    const offlineBasemapSelect = document.getElementById('offlineBasemapSelect');
+    offlineBasemapSelect.value = offlineBasemapId;
+    offlineBasemapSelect.addEventListener('change', function () {
+      const chosen = this.value;
+      if (chosen === offlineBasemapId) return;
+      if (recording) {
+        showMessage_('Arrête le téléchargement en cours avant de changer ce réglage.', 'error');
+        this.value = offlineBasemapId;
+        return;
+      }
+      if (!confirm('Le fond hors-ligne sera "' + basemapLabel_(chosen) + '". L\'application va se recharger pour appliquer ce changement. Les cartes déjà téléchargées restent conservées (sous l\'ancien fond).')) {
+        this.value = offlineBasemapId;
+        return;
+      }
+      localStorage.setItem(OFFLINE_BASEMAP_KEY, chosen);
+      localStorage.setItem(ACTIVE_BASEMAP_KEY, chosen);
+      location.reload();
+    });
+
     document.getElementById('settingsBtn').addEventListener('click', function () {
       document.getElementById('settingsModal').hidden = false;
     });

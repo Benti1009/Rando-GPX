@@ -53,9 +53,11 @@ self.addEventListener('activate', function (event) {
 self.addEventListener('fetch', function (event) {
   const req = event.request;
 
-  // Ne jamais intercepter les tuiles de carte : elles ont leur propre cache
-  // (IndexedDB) géré directement par la page.
+  // Ne jamais intercepter les tuiles de carte (quel que soit le fond) : elles
+  // ont leur propre cache (IndexedDB) géré directement par la page.
   if (req.url.indexOf('tile.openstreetmap.org') !== -1) return;
+  if (req.url.indexOf('data.geopf.fr') !== -1) return;
+  if (req.url.indexOf('tile.opentopomap.org') !== -1) return;
 
   // Uniquement les requêtes GET peuvent être mises en cache.
   if (req.method !== 'GET') return;
