@@ -157,6 +157,9 @@
       width: 36px; height: 36px; border-radius: 50%;
     }
     .region-delete:active { background: #fef2f2; }
+
+    /* Fine ligne de séparation entre un contrôle de Paramètres et son explication */
+    .setting-divider { border: none; border-top: 1px solid #f3f4f6; margin: 8px 0; }
   </style>
 </head>
 <body>
@@ -199,39 +202,43 @@
         <button id="closeSettingsBtn" class="modal-close" aria-label="Fermer">✕</button>
       </div>
       <div style="padding: 0 16px 16px;">
-        <p style="font-size: 13px; color: #6b7280; margin: 0 0 8px;">
-          Fond de carte utilisé pour les téléchargements hors-ligne (bouton ⬇️). Les autres
-          fonds restent consultables uniquement avec une connexion. Changer ce réglage
-          recharge l'application.
-        </p>
-        <select id="offlineBasemapSelect" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 14px; font-family: inherit; margin-bottom: 16px; background: #fff;">
+        <select id="offlineBasemapSelect" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 14px; font-family: inherit; margin-bottom: 8px; background: #fff;">
           <option value="osm">OpenStreetMap</option>
           <option value="ign">IGN (Plan IGN)</option>
           <option value="opentopo">OpenTopoMap</option>
         </select>
-        <p style="font-size: 13px; color: #6b7280; margin: 0 0 12px;">
-          Demande au navigateur de protéger les cartes hors-ligne pour qu'il ne les efface
-          pas automatiquement en cas de manque de place. Sur certains navigateurs (Chrome,
-          Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.
+        <hr class="setting-divider">
+        <p style="font-size: 13px; color: #6b7280; margin: 0 0 16px;">
+          Fond de carte utilisé pour les téléchargements hors-ligne (bouton ⬇️). Les autres
+          fonds restent consultables uniquement avec une connexion. Changer ce réglage
+          recharge l'application.
         </p>
         <button id="persistStorageBtn" class="file-btn" style="width: 100%; text-align: center; background: #16a34a;">
           🔒 Activer le stockage persistant
         </button>
-        <p style="font-size: 13px; color: #6b7280; margin: 16px 0 12px;">
-          Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
-          pour forcer le téléchargement de la dernière version publiée. Tes cartes hors-ligne
-          téléchargées ne sont pas supprimées.
+        <hr class="setting-divider">
+        <p style="font-size: 13px; color: #6b7280; margin: 0 0 16px;">
+          Demande au navigateur de protéger les cartes hors-ligne pour qu'il ne les efface
+          pas automatiquement en cas de manque de place. Sur certains navigateurs (Chrome,
+          Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.
         </p>
         <button id="clearCacheBtn" class="file-btn danger" style="width: 100%; text-align: center;">
           🗑️ Vider le cache et recharger
         </button>
-        <p style="font-size: 13px; color: #6b7280; margin: 16px 0 12px;">
-          Supprime définitivement toutes les cartes hors-ligne (téléchargées ou mises en
-          cache en te baladant) et les tracés enregistrés avec elles. Irréversible.
+        <hr class="setting-divider">
+        <p style="font-size: 13px; color: #6b7280; margin: 0 0 16px;">
+          Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
+          pour forcer le téléchargement de la dernière version publiée. Tes cartes hors-ligne
+          téléchargées ne sont pas supprimées.
         </p>
         <button id="clearAllDataBtn" class="file-btn danger" style="width: 100%; text-align: center;">
           🗑️ Supprimer toutes les données
         </button>
+        <hr class="setting-divider">
+        <p style="font-size: 13px; color: #6b7280; margin: 0;">
+          Supprime définitivement toutes les cartes hors-ligne (téléchargées ou mises en
+          cache en te baladant) et les tracés enregistrés avec elles. Irréversible.
+        </p>
       </div>
     </div>
   </div>
@@ -254,7 +261,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.14';
+    const APP_VERSION = '1.17';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
