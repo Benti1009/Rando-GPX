@@ -159,6 +159,12 @@
     .region-row:active { background: #f9fafb; }
     .region-info { display: flex; flex-direction: column; font-size: 13px; }
     .region-info span { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .region-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .region-rename {
+      background: none; border: none; font-size: 16px; cursor: pointer; flex-shrink: 0;
+      width: 36px; height: 36px; border-radius: 50%;
+    }
+    .region-rename:active { background: #f3f4f6; }
     .region-delete {
       background: none; border: none; font-size: 18px; cursor: pointer; flex-shrink: 0;
       width: 36px; height: 36px; border-radius: 50%;
@@ -270,7 +276,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.20';
+    const APP_VERSION = '1.21';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -305,6 +311,9 @@
     // Carte
     // ========================================================================
     const map = L.map('map', { zoomControl: true }).setView([46.6, 2.4], 6); // vue par défaut : France
+
+    // Échelle métrique affichée en bas à gauche de la carte.
+    L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(map);
 
     window.addEventListener('resize', function () { map.invalidateSize(); });
     setTimeout(function () { map.invalidateSize(); }, 300);
@@ -794,7 +803,10 @@
           return '<div class="region-row" data-id="' + r.id + '">' +
             '<div class="region-info"><b>' + escapeHtml_(r.name) + '</b>' +
             '<span>' + d + ' · ' + basemapLabel_(r.basemapId) + ' · ' + formatBytes_(r.sizeBytes) + ' · ' + r.tileKeys.length + ' tuiles' + (r.gpxText ? '' : ' · sans tracé') + '</span></div>' +
+            '<div class="region-actions">' +
+            '<button class="region-rename" data-id="' + r.id + '" aria-label="Renommer cette carte">✏️</button>' +
             '<button class="region-delete" data-id="' + r.id + '" aria-label="Supprimer cette carte">🗑️</button>' +
+            '</div>' +
             '</div>';
         }).join('');
       }
@@ -931,6 +943,21 @@
       if (e.target.id === 'regionsModal') e.currentTarget.hidden = true;
     });
     document.getElementById('regionsList').addEventListener('click', async function (e) {
+      const renameBtn = e.target.closest('.region-rename');
+      if (renameBtn) {
+        const id = renameBtn.getAttribute('data-id');
+        const regions = await listRegions_();
+        const region = regions.find(function (r) { return r.id === id; });
+        if (!region) return;
+        const newName = prompt('Nouveau nom de la carte :', region.name);
+        if (newName === null) return; // annulé
+        const trimmed = newName.trim();
+        if (!trimmed || trimmed === region.name) return;
+        region.name = trimmed;
+        await saveRegion_(region);
+        openRegionsModal_();
+        return;
+      }
       const delBtn = e.target.closest('.region-delete');
       if (delBtn) {
         delBtn.disabled = true;
