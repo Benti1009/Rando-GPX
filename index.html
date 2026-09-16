@@ -71,10 +71,17 @@
 
     #message {
       display: none;
+      align-items: flex-start; justify-content: space-between; gap: 8px;
       font-size: 12px; border-radius: 6px; padding: 8px 10px;
     }
     #message.error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
     #message.info  { color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; }
+    #messageText { flex: 1; }
+    #messageClose {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      font-size: 14px; line-height: 1; padding: 0 0 0 4px; color: inherit; opacity: 0.6;
+    }
+    #messageClose:active { opacity: 1; }
 
     #map { height: 100%; width: 100%; background: #e5e7eb; }
 
@@ -177,7 +184,10 @@
         </div>
       </div>
       <div id="stats"></div>
-      <div id="message"></div>
+      <div id="message">
+        <span id="messageText"></span>
+        <button id="messageClose" aria-label="Fermer le message">✕</button>
+      </div>
     </header>
 
     <div style="position:relative; flex:1; min-height:0;">
@@ -260,7 +270,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.19';
+    const APP_VERSION = '1.20';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -1112,10 +1122,13 @@
 
     function showMessage_(text, type) {
       const el = document.getElementById('message');
-      el.textContent = text;
+      document.getElementById('messageText').textContent = text;
       el.className = type === 'info' ? 'info' : 'error';
-      el.style.display = text ? 'block' : 'none';
+      el.style.display = text ? 'flex' : 'none';
     }
+    document.getElementById('messageClose').addEventListener('click', function () {
+      showMessage_('');
+    });
 
     document.getElementById('gpxFile').addEventListener('change', function (e) {
       const file = e.target.files[0];
