@@ -60,7 +60,13 @@
     .file-btn.danger { background: #dc2626; }
     .file-btn.danger:active { background: #b91c1c; }
 
-    #fileName { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #fileName {
+      font-size: 12px; color: #6b7280;
+      overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      white-space: normal; line-height: 1.3;
+      max-width: 120px;
+    }
 
     #stats {
       display: none;
@@ -173,6 +179,14 @@
 
     /* Fine ligne de séparation entre un contrôle de Paramètres et son explication */
     .setting-divider { border: none; border-top: 2px solid #d1d5db; margin: 8px 0; }
+
+    /* Remonte l'échelle Leaflet pour qu'elle ne se fasse pas recouvrir par la
+       ligne d'attribution (© OpenStreetMap...) en bas de carte, surtout sur
+       mobile où cette ligne peut passer sur deux lignes. */
+    .leaflet-control-scale {
+      margin-bottom: max(34px, calc(env(safe-area-inset-bottom) + 24px)) !important;
+      margin-left: max(10px, env(safe-area-inset-left)) !important;
+    }
   </style>
 </head>
 <body>
@@ -182,7 +196,7 @@
         <h1>Rando GPX <span id="appVersion" class="app-version"></span></h1>
         <div style="display:flex; align-items:center; gap:10px;">
           <span id="fileName"></span>
-          <label class="file-btn" for="gpxFile">Choisir un fichier</label>
+          <label class="file-btn" for="gpxFile" style="flex-shrink:0;">Choisir un fichier</label>
           <!-- Pas d'attribut "accept" : iOS ne connaît pas l'extension .gpx (contrairement à
                .pdf ou .jpg) et grise le fichier dans le sélecteur si on tente de filtrer dessus.
                On laisse donc tout sélectionnable, et on vérifie l'extension nous-mêmes ensuite. -->
@@ -276,7 +290,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.21';
+    const APP_VERSION = '1.22.1';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
