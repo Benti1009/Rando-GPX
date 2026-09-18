@@ -412,7 +412,10 @@
     // zoomSnap bas (au lieu de 1) pour permettre un zoom tactile progressif et
     // fluide (voir le geste "tap + glisser" plus bas), plutôt que par paliers
     // entiers uniquement.
-    const map = L.map('map', { zoomControl: true, zoomSnap: 0.25, zoomDelta: 1 }).setView([46.6, 2.4], 6); // vue par défaut : France
+    const map = L.map('map', { zoomControl: true, zoomSnap: 0.25, zoomDelta: 1 });
+    // Vue par défaut : cadrée sur les départements 64 (Pyrénées-Atlantiques)
+    // et 65 (Hautes-Pyrénées).
+    map.fitBounds([[42.7, -1.85], [43.65, 0.65]]);
 
     // Échelle métrique affichée en bas à gauche de la carte.
     L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(map);
