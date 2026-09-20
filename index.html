@@ -286,38 +286,18 @@
           <option value="ign">IGN (Plan IGN)</option>
           <option value="opentopo">OpenTopoMap</option>
         </select>
-        <p style="font-size: 13px; color: #6b7280; margin: 0;">
-          Fond de carte utilisé pour les téléchargements hors-ligne (bouton ⬇️). Les autres
-          fonds restent consultables uniquement avec une connexion. Changer ce réglage
-          recharge l'application.
-        </p>
         <hr class="setting-divider">
         <button id="persistStorageBtn" class="file-btn" style="width: 100%; text-align: center; background: #16a34a;">
           🔒 Activer le stockage persistant
         </button>
-        <p style="font-size: 13px; color: #6b7280; margin: 8px 0 0;">
-          Demande au navigateur de protéger les cartes hors-ligne pour qu'il ne les efface
-          pas automatiquement en cas de manque de place. Sur certains navigateurs (Chrome,
-          Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.
-        </p>
         <hr class="setting-divider">
         <button id="checkUpdateBtn" class="file-btn" style="width: 100%; text-align: center; background: #2563eb;">
           🔄 Vérifier les mises à jour
         </button>
-        <p style="font-size: 13px; color: #6b7280; margin: 8px 0 0;">
-          Compare la version installée à la dernière version publiée. En cas de nouvelle
-          version, propose de la télécharger (le cache technique est alors vidé et l'appli se
-          recharge). Vos cartes hors-ligne téléchargées ne sont jamais touchées. Cette
-          vérification se fait aussi automatiquement à l'ouverture de l'appli.
-        </p>
         <hr class="setting-divider">
         <button id="clearAllDataBtn" class="file-btn danger" style="width: 100%; text-align: center;">
           🗑️ Supprimer toutes les données
         </button>
-        <p style="font-size: 13px; color: #6b7280; margin: 8px 0 0;">
-          Supprime définitivement toutes les cartes hors-ligne (téléchargées ou mises en
-          cache en te baladant) et les tracés enregistrés avec elles. Irréversible.
-        </p>
       </div>
     </div>
   </div>
@@ -351,7 +331,7 @@
         <p><b>⬇️ Téléchargement hors-ligne</b> — démarre l'enregistrement automatique des images
         de carte (« tuiles ») le long du tracé actuellement affiché, à plusieurs niveaux de zoom,
         pour pouvoir consulter cette carte plus tard sans connexion. La carte se déplace toute
-        seule le long du parcours pendant l'enregistrement (« balade automatique ») ; appuie sur
+        seule le long du parcours pendant l'enregistrement (« balade automatique ») ; appuyer sur
         <b>⏹️</b> pour l'arrêter à tout moment. Un bandeau en haut affiche la progression. Il faut
         d'abord avoir chargé un fichier .gpx, et être sur le fond de carte de référence choisi
         dans Paramètres (le bouton est grisé sinon).</p>
@@ -370,14 +350,18 @@
         niveau de zoom actuel.</p>
 
         <h3>Paramètres (⚙️)</h3>
-        <p><b>Fond hors-ligne</b> — choisit quel fond de carte est mis en cache par le bouton ⬇️.</p>
+        <p><b>Fond hors-ligne</b> — choisit quel fond de carte est mis en cache par le bouton ⬇️.
+        Changer ce réglage recharge l'application.</p>
         <p><b>Stockage persistant</b> — demande au navigateur de ne pas effacer automatiquement
-        les cartes téléchargées en cas de manque de place.</p>
+        les cartes téléchargées en cas de manque de place. Sur certains navigateurs (Chrome,
+        Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.</p>
         <p><b>Vérifier les mises à jour</b> — compare la version installée à la dernière version
-        publiée et propose de la télécharger si besoin, sans toucher aux cartes hors-ligne déjà
-        téléchargées. Se fait aussi automatiquement à l'ouverture de l'appli.</p>
+        publiée et propose de la télécharger si besoin (le cache technique est alors vidé et
+        l'appli se recharge), sans toucher aux cartes hors-ligne déjà téléchargées. Se fait aussi
+        automatiquement à l'ouverture de l'appli.</p>
         <p><b>Supprimer toutes les données</b> — efface définitivement toutes les cartes
-        hors-ligne et les tracés enregistrés avec elles.</p>
+        hors-ligne (téléchargées ou mises en cache en se baladant) et les tracés enregistrés avec
+        elles. Irréversible.</p>
 
         <h3>Fonctionnement hors réseau</h3>
         <p>Une fois installée sur l'écran d'accueil, l'appli se recharge même sans connexion, et
@@ -392,7 +376,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.25.1';
+    const APP_VERSION = '1.25.2';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -1267,7 +1251,7 @@
       const chosen = this.value;
       if (chosen === offlineBasemapId) return;
       if (recording) {
-        showMessage_('Arrête le téléchargement en cours avant de changer ce réglage.', 'error');
+        showMessage_('Arrêter le téléchargement en cours avant de changer ce réglage.', 'error');
         this.value = offlineBasemapId;
         return;
       }
