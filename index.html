@@ -98,6 +98,33 @@
     }
     #messageClose:active { opacity: 1; }
 
+    /* Info-bulle plein écran pour les erreurs et le résultat de la vérification
+       de mise à jour : plus visible que le bandeau du haut, notamment quand la
+       carte occupe tout l'écran. */
+    #overlayMessage {
+      display: none;
+      position: fixed; inset: 0; z-index: 3000;
+      align-items: center; justify-content: center;
+      padding: 24px;
+      background: rgba(17, 24, 39, 0.45);
+    }
+    #overlayMessage.visible { display: flex; }
+    .overlay-message-box {
+      max-width: 420px; width: 100%;
+      border-radius: 12px; padding: 18px 20px;
+      font-size: 15px; line-height: 1.4;
+      display: flex; align-items: flex-start; gap: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    .overlay-message-box.error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
+    .overlay-message-box.info  { color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; }
+    #overlayMessageText { flex: 1; }
+    #overlayMessageClose {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      font-size: 18px; line-height: 1; padding: 0; color: inherit; opacity: 0.6;
+    }
+    #overlayMessageClose:active { opacity: 1; }
+
     #map { height: 100%; width: 100%; background: #e5e7eb; }
 
     #emptyOverlay {
@@ -254,6 +281,13 @@
       </div>
     </header>
 
+    <div id="overlayMessage">
+      <div id="overlayMessageBox" class="overlay-message-box">
+        <span id="overlayMessageText"></span>
+        <button id="overlayMessageClose" aria-label="Fermer le message">✕</button>
+      </div>
+    </div>
+
     <div style="position:relative; flex:1; min-height:0;">
       <div id="map"></div>
       <div id="emptyOverlay"><span>Choisir un fichier .gpx pour afficher le tracé</span></div>
@@ -376,7 +410,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.25.2';
+    const APP_VERSION = '1.25.3';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -1310,7 +1344,7 @@
       try {
         const remoteVersion = await fetchRemoteVersion_();
         if (remoteVersion === APP_VERSION) {
-          showMessage_('✅ Déjà à jour (v' + APP_VERSION + ').', 'info');
+          showMessage_('✅ Déjà à jour (v' + APP_VERSION + ').', 'update');
         } else {
           const proceed = confirm('Nouvelle version disponible (v' + remoteVersion + ', actuelle v' +
             APP_VERSION + '). Mettre à jour maintenant ?');
@@ -1562,13 +1596,39 @@
     }
 
     function showMessage_(text, type) {
-      const el = document.getElementById('message');
-      document.getElementById('messageText').textContent = text;
-      el.className = type === 'info' ? 'info' : 'error';
-      el.style.display = text ? 'flex' : 'none';
+      // Les erreurs et le résultat de la vérification de mise à jour ('update')
+      // passent par l'info-bulle plein écran, plus visible que le bandeau du
+      // haut ; les autres messages ('info') restent dans le bandeau.
+      const isOverlay = type === 'error' || type === 'update';
+
+      // On masque systématiquement les deux emplacements avant de (ré)afficher,
+      // pour ne pas laisser un ancien message affiché ailleurs pendant qu'on
+      // enchaîne des actions.
+      document.getElementById('message').style.display = 'none';
+      document.getElementById('overlayMessage').classList.remove('visible');
+
+      if (!text) return;
+
+      if (isOverlay) {
+        document.getElementById('overlayMessageText').textContent = text;
+        document.getElementById('overlayMessageBox').className =
+          'overlay-message-box ' + (type === 'update' ? 'info' : 'error');
+        document.getElementById('overlayMessage').classList.add('visible');
+      } else {
+        const el = document.getElementById('message');
+        document.getElementById('messageText').textContent = text;
+        el.className = type === 'info' ? 'info' : 'error';
+        el.style.display = 'flex';
+      }
     }
     document.getElementById('messageClose').addEventListener('click', function () {
       showMessage_('');
+    });
+    document.getElementById('overlayMessageClose').addEventListener('click', function () {
+      showMessage_('');
+    });
+    document.getElementById('overlayMessage').addEventListener('click', function (e) {
+      if (e.target.id === 'overlayMessage') showMessage_('');
     });
 
     document.getElementById('gpxFile').addEventListener('change', function (e) {
