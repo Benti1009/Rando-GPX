@@ -390,7 +390,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.22.9';
+    const APP_VERSION = '1.23.0';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -486,10 +486,12 @@
     // ========================================================================
     // Geste tactile "double-tap" : zoom avant d'un niveau, centré sur le point
     // tapé. Et "double-tap puis glisser sans relâcher le doigt vers le haut ou
-    // le bas" : zoome ou dézoome en continu tant qu'on glisse (comme sur
-    // Google Maps). On ignore les contrôles Leaflet (zoom +/-, calques) pour
-    // ne pas déclencher le geste dessus, et le pincement à deux doigts n'est
-    // jamais concerné (on n'agit que sur un seul doigt à la fois).
+    // le bas" : zoome ou dézoome selon l'amplitude du glissé, appliqué en une
+    // seule fois au relâché du doigt (pas en continu pendant le geste, pour
+    // éviter les à-coups liés au repositionnement répété des tuiles). On
+    // ignore les contrôles Leaflet (zoom +/-, calques) pour ne pas déclencher
+    // le geste dessus, et le pincement à deux doigts n'est jamais concerné
+    // (on n'agit que sur un seul doigt à la fois).
     // ========================================================================
     (function () {
       const mapEl = document.getElementById('map');
@@ -505,19 +507,7 @@
       let gestureStartZoom = 0;
       let gestureCenter = null;
       let gestureMoved = false;
-      // Le zoom continu (glissé) est appliqué au rythme de l'écran (via rAF)
-      // plutôt qu'à chaque événement tactile brut, qui peut arriver plus
-      // souvent que l'affichage ne peut suivre : ça évite les à-coups liés
-      // au recalcul répété des tuiles et du tracé pendant le glissé.
-      let rafId = null;
-      let pendingDeltaY = null;
-
-      function applyPendingZoom_() {
-        rafId = null;
-        if (!gestureActive || pendingDeltaY === null) return;
-        const newZoom = gestureStartZoom + pendingDeltaY / PIXELS_PER_ZOOM_LEVEL;
-        map.setZoomAround(gestureCenter, newZoom, { animate: false });
-      }
+      let lastDeltaY = 0;
 
       mapEl.addEventListener('touchstart', function (e) {
         if (gestureActive) return;
@@ -552,19 +542,23 @@
         const touch = e.touches[0];
         const deltaY = gestureStartY - touch.clientY; // vers le haut = positif
         if (Math.abs(deltaY) > DRAG_MOVE_THRESHOLD) gestureMoved = true;
-        pendingDeltaY = deltaY;
-        if (rafId === null) {
-          rafId = requestAnimationFrame(applyPendingZoom_);
-        }
+        // On ne touche plus à la carte pendant le glissé : chaque appel à
+        // setZoomAround() pendant le mouvement forçait Leaflet à repositionner
+        // tuiles et tracé, d'où les à-coups/flashs. On se contente de retenir
+        // la position, et on applique le zoom en une seule fois au relâché.
+        lastDeltaY = deltaY;
       }, { passive: false });
 
       function endGesture_() {
         if (!gestureActive) return;
         gestureActive = false;
-        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-        pendingDeltaY = null;
         map.dragging.enable();
-        if (!gestureMoved) {
+        if (gestureMoved) {
+          // Glissé terminé : on applique le zoom final en une seule
+          // transition animée, plutôt qu'en continu pendant le geste.
+          const newZoom = gestureStartZoom + lastDeltaY / PIXELS_PER_ZOOM_LEVEL;
+          map.setZoomAround(gestureCenter, newZoom, { animate: true });
+        } else {
           // Simple double-tap, sans glissé : zoom avant d'un niveau, comme un
           // double-tap classique, avec une animation explicite et douce.
           map.setZoomAround(gestureCenter, gestureStartZoom + 1, { animate: true });
