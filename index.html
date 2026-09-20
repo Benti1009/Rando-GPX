@@ -392,7 +392,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.25.0';
+    const APP_VERSION = '1.25.1';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -909,6 +909,22 @@
     basemapLayers[activeBasemapId].addTo(map);
     L.control.layers(basemapLayersByLabel, null, { position: 'topright' }).addTo(map);
 
+    // Suivi des tuiles en échec pendant la balade automatique : createTile()
+    // fait déjà plusieurs tentatives avant d'abandonner une tuile (voir
+    // TILE_LOAD_ATTEMPTS plus haut) ; si malgré ça une tuile finit en échec,
+    // Leaflet déclenche 'tileerror' sur le calque. On la note ici pour la
+    // retenter explicitement à la fin de l'arrêt en cours (cf. runAutoTour_),
+    // plutôt que de laisser un trou silencieux dans la carte téléchargée.
+    // En dehors d'une balade automatique (currentStopFailedTiles === null),
+    // on ignore : le rechargement manuel gère déjà ses propres réessais.
+    let currentStopFailedTiles = null;
+    tileLayer.on('tileerror', function (e) {
+      if (!currentStopFailedTiles) return;
+      const coords = e.coords;
+      const key = tileLayer.options.cacheId + '/' + coords.z + '/' + coords.x + '/' + coords.y;
+      currentStopFailedTiles.set(key, { coords: coords, url: tileLayer.getTileUrl(coords) });
+    });
+
     map.on('baselayerchange', function (e) {
       const newId = Object.keys(basemapLayers).find(function (id) { return basemapLayers[id] === e.layer; });
       if (!newId) return;
@@ -934,6 +950,8 @@
     let recordingRegion = null;
     let autoTourCancelled = false;
     let autoTourRunning = false;
+    let autoTourRecoveredCount = 0; // tuiles en échec initial mais récupérées après nouvelle tentative
+    let autoTourUnresolvedCount = 0; // tuiles restées en échec malgré tout
 
     function sleep_(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -1073,6 +1091,26 @@
     // ========================================================================
     const AUTO_TOUR_ZOOMS = [11, 13, 15, 16, 17];
 
+    // Nouvelles tentatives (en plus de celles déjà faites par createTile_) pour
+    // les tuiles qui restent en échec à la fin d'un arrêt, avant de continuer.
+    const AUTO_TOUR_TILE_RETRY_ATTEMPTS = 2;
+
+    async function retryFailedTilesAtStop_(failedTiles) {
+      const entries = Array.from(failedTiles.values());
+      for (let i = 0; i < entries.length; i++) {
+        const coords = entries[i].coords;
+        const key = tileLayer.options.cacheId + '/' + coords.z + '/' + coords.x + '/' + coords.y;
+        try {
+          const blob = await fetchTileBlobWithRetry_(entries[i].url, AUTO_TOUR_TILE_RETRY_ATTEMPTS);
+          putCachedTile_(key, blob).catch(function () { /* non bloquant */ });
+          attributeTileToRecording_(key, blob);
+          autoTourRecoveredCount++;
+        } catch (e) {
+          autoTourUnresolvedCount++;
+        }
+      }
+    }
+
     async function runAutoTour_() {
       if (!currentLine) return;
       const latlngs = currentLine.getLatLngs();
@@ -1080,6 +1118,8 @@
 
       autoTourCancelled = false;
       autoTourRunning = true;
+      autoTourRecoveredCount = 0;
+      autoTourUnresolvedCount = 0;
       const myRegionId = recordingRegion.id;
 
       try {
@@ -1100,7 +1140,7 @@
           const totalStops = Math.max(1, Math.ceil(estimateTrackLength_(latlngs) / stepMeters)) + 1;
 
           for (let i = 0; i < latlngs.length; i++) {
-            if (autoTourCancelled || !recording || recordingRegion.id !== myRegionId) { autoTourRunning = false; return; }
+            if (autoTourCancelled || !recording || recordingRegion.id !== myRegionId) { autoTourRunning = false; currentStopFailedTiles = null; return; }
 
             if (i > 0) dist += latlngs[i - 1].distanceTo(latlngs[i]);
 
@@ -1108,15 +1148,29 @@
               stopIndex++;
               nextStopAt = dist + stepMeters;
               map.setView(latlngs[i], zoom, { animate: false });
+              currentStopFailedTiles = new Map();
               updateRecordingStatus_('Balade automatique : zoom ' + zoom + ' (niveau ' + (zi + 1) + '/' + AUTO_TOUR_ZOOMS.length + ') · étape ' + Math.min(stopIndex, totalStops) + '/' + totalStops);
               await waitForTilesLoaded_(900);
+              if (currentStopFailedTiles.size > 0) {
+                updateRecordingStatus_('Balade automatique : vérification de ' + currentStopFailedTiles.size + ' tuile(s) en échec...');
+                await retryFailedTilesAtStop_(currentStopFailedTiles);
+              }
+              currentStopFailedTiles = null;
             }
           }
         }
-        updateRecordingStatus_('Balade automatique terminée. Vous pouvez continuer à vous balader manuellement, ou arrêter.');
+        let finalMsg = 'Balade automatique terminée.';
+        if (autoTourUnresolvedCount > 0) {
+          finalMsg += ' ⚠️ ' + autoTourUnresolvedCount + ' tuile(s) n\'ont pas pu être téléchargées malgré les tentatives.';
+        } else if (autoTourRecoveredCount > 0) {
+          finalMsg += ' (' + autoTourRecoveredCount + ' tuile(s) récupérée(s) après un échec initial.)';
+        }
+        finalMsg += ' Vous pouvez continuer à vous balader manuellement, ou arrêter.';
+        updateRecordingStatus_(finalMsg);
       } catch (e) {
         console.warn('Erreur pendant la balade automatique :', e);
       }
+      currentStopFailedTiles = null;
       autoTourRunning = false;
     }
 
