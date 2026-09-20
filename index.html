@@ -495,6 +495,7 @@
     // ========================================================================
     (function () {
       const mapEl = document.getElementById('map');
+      const mapPane = map.getPane('mapPane'); // panneau qui porte tuiles/tracé (pas les contrôles)
       const TAP_MAX_DELAY = 300;   // ms max entre les deux taps
       const TAP_MAX_DIST = 40;     // px de tolérance de position entre les deux taps
       const DRAG_MOVE_THRESHOLD = 10; // px : en dessous, on considère qu'il n'y a pas eu de glissé
@@ -506,8 +507,10 @@
       let gestureStartY = 0;
       let gestureStartZoom = 0;
       let gestureCenter = null;
+      let gestureOriginPoint = null; // point tapé, en pixels dans le conteneur carte
+      let gestureBasePos = null;     // position (translate) du mapPane au repos, avant l'agrandissement visuel
       let gestureMoved = false;
-      let lastDeltaY = 0;
+      let lastScale = 1;
 
       mapEl.addEventListener('touchstart', function (e) {
         if (gestureActive) return;
@@ -520,14 +523,24 @@
 
         if (lastTapTime && (now - lastTapTime) < TAP_MAX_DELAY && lastTapPoint &&
             Math.hypot(point.x - lastTapPoint.x, point.y - lastTapPoint.y) < TAP_MAX_DIST) {
+          // Double-tap détecté : on annule tout de suite le basculement du
+          // plein écran (tap simple) qui pouvait être en attente, plutôt que
+          // de compter sur l'annulation via l'événement "click" du second tap
+          // — celui-ci n'arrive pas toujours (le navigateur ne synthétise pas
+          // de "click" quand touchmove a appelé preventDefault entretemps),
+          // ce qui déclenchait le plein écran en plus du zoom.
+          if (pendingUiToggle) { clearTimeout(pendingUiToggle); pendingUiToggle = null; }
+
           gestureActive = true;
           gestureMoved = false;
           gestureStartY = touch.clientY;
           gestureStartZoom = map.getZoom();
           const rect = mapEl.getBoundingClientRect();
-          gestureCenter = map.containerPointToLatLng(
-            L.point(touch.clientX - rect.left, touch.clientY - rect.top)
-          );
+          gestureOriginPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+          gestureCenter = map.containerPointToLatLng(gestureOriginPoint);
+          gestureBasePos = L.DomUtil.getPosition(mapPane);
+          lastScale = 1;
+          mapPane.style.transition = 'none';
           map.dragging.disable();
           lastTapTime = 0;
         } else {
@@ -542,21 +555,32 @@
         const touch = e.touches[0];
         const deltaY = gestureStartY - touch.clientY; // vers le haut = positif
         if (Math.abs(deltaY) > DRAG_MOVE_THRESHOLD) gestureMoved = true;
-        // On ne touche plus à la carte pendant le glissé : chaque appel à
-        // setZoomAround() pendant le mouvement forçait Leaflet à repositionner
-        // tuiles et tracé, d'où les à-coups/flashs. On se contente de retenir
-        // la position, et on applique le zoom en une seule fois au relâché.
-        lastDeltaY = deltaY;
+        // Pendant le glissé, on ne touche pas au vrai zoom Leaflet (donc pas
+        // de rechargement de tuiles) : on agrandit/rétrécit juste visuellement
+        // le panneau de la carte (transform CSS, pur affichage), centré sur
+        // le point tapé. Les tuiles ne sont recalculées qu'au relâché.
+        const zoomDelta = deltaY / PIXELS_PER_ZOOM_LEVEL;
+        const scale = Math.pow(2, zoomDelta);
+        lastScale = scale;
+        const p = gestureOriginPoint, b = gestureBasePos;
+        const newX = p.x - scale * (p.x - b.x);
+        const newY = p.y - scale * (p.y - b.y);
+        L.DomUtil.setTransform(mapPane, L.point(newX, newY), scale);
       }, { passive: false });
 
       function endGesture_() {
         if (!gestureActive) return;
         gestureActive = false;
         map.dragging.enable();
+        // On enlève l'agrandissement visuel temporaire avant de déclencher le
+        // vrai zoom Leaflet, pour repartir d'un état propre — la bascule se
+        // fait dans le même tick JS (sans repaint entretemps) donc sans saut
+        // visible, et Leaflet prend le relais avec sa propre transition.
+        L.DomUtil.setTransform(mapPane, gestureBasePos, 1);
+        mapPane.style.transition = '';
         if (gestureMoved) {
-          // Glissé terminé : on applique le zoom final en une seule
-          // transition animée, plutôt qu'en continu pendant le geste.
-          const newZoom = gestureStartZoom + lastDeltaY / PIXELS_PER_ZOOM_LEVEL;
+          const zoomDelta = Math.log(lastScale) / Math.LN2;
+          const newZoom = gestureStartZoom + zoomDelta;
           map.setZoomAround(gestureCenter, newZoom, { animate: true });
         } else {
           // Simple double-tap, sans glissé : zoom avant d'un niveau, comme un
