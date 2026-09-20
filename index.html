@@ -390,7 +390,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.23.0';
+    const APP_VERSION = '1.23.1';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -445,6 +445,7 @@
     // ========================================================================
     let uiHidden = false;
     let pendingUiToggle = null;
+    let doubleTapGuardUntil = 0; // ignore les "click" (1er et 2e tap) le temps d'un double-tap
 
     function setUiHidden_(hidden) {
       uiHidden = hidden;
@@ -466,6 +467,12 @@
     }
 
     map.on('click', function () {
+      if (Date.now() < doubleTapGuardUntil) {
+        // Clic issu du 1er ou du 2e tap d'un double-tap déjà traité comme
+        // geste de zoom (voir plus bas) : on l'ignore complètement, plutôt
+        // que de le laisser armer un nouveau basculement plein écran.
+        return;
+      }
       if (pendingUiToggle) {
         // Second tap rapproché : c'était un double-tap, pas un tap simple —
         // on annule le basculement prévu.
@@ -523,12 +530,12 @@
 
         if (lastTapTime && (now - lastTapTime) < TAP_MAX_DELAY && lastTapPoint &&
             Math.hypot(point.x - lastTapPoint.x, point.y - lastTapPoint.y) < TAP_MAX_DIST) {
-          // Double-tap détecté : on annule tout de suite le basculement du
-          // plein écran (tap simple) qui pouvait être en attente, plutôt que
-          // de compter sur l'annulation via l'événement "click" du second tap
-          // — celui-ci n'arrive pas toujours (le navigateur ne synthétise pas
-          // de "click" quand touchmove a appelé preventDefault entretemps),
-          // ce qui déclenchait le plein écran en plus du zoom.
+          // Double-tap détecté : on bloque toute prise en compte des clics
+          // (celui déjà programmé par le 1er tap, et celui à venir du 2e tap,
+          // que le navigateur envoie ou non un "click" selon qu'il y a eu du
+          // mouvement) pendant une courte fenêtre, plutôt que de compter sur
+          // l'annulation classique via un second "click" — pas fiable ici.
+          doubleTapGuardUntil = Date.now() + 400;
           if (pendingUiToggle) { clearTimeout(pendingUiToggle); pendingUiToggle = null; }
 
           gestureActive = true;
