@@ -392,7 +392,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.24.0';
+    const APP_VERSION = '1.24.1';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -807,6 +807,49 @@
     // (zoomer/se balader sur le tracé pendant qu'on est connecté) qui alimente
     // le mode hors-ligne, plutôt qu'un téléchargement en masse d'une zone qu'on
     // ne regarde pas encore — ce que les serveurs OpenStreetMap bloquent.
+    //
+    // Une tuile qui échoue (aléa réseau, serveur momentanément indisponible…)
+    // est réessayée automatiquement quelques fois avant d'abandonner, plutôt
+    // que de laisser un trou définitif dans la carte téléchargée — utile
+    // surtout pendant la balade automatique, qui enchaîne beaucoup de tuiles.
+    const TILE_LOAD_ATTEMPTS = 3; // essai initial + 2 nouvelles tentatives
+    const TILE_RETRY_DELAY_MS = 350;
+
+    function loadTileImgWithRetry_(img, url, onDone, attemptsLeft) {
+      if (attemptsLeft === undefined) attemptsLeft = TILE_LOAD_ATTEMPTS;
+      img.onload = function () { onDone(null); };
+      img.onerror = function () {
+        if (attemptsLeft > 1) {
+          setTimeout(function () { loadTileImgWithRetry_(img, url, onDone, attemptsLeft - 1); }, TILE_RETRY_DELAY_MS);
+        } else {
+          onDone(new Error('tuile en échec après ' + TILE_LOAD_ATTEMPTS + ' tentatives'));
+        }
+      };
+      // Petit paramètre anti-cache sur les tentatives suivantes, pour ne pas
+      // resservir depuis le cache HTTP du navigateur la même réponse en échec.
+      img.src = attemptsLeft < TILE_LOAD_ATTEMPTS
+        ? url + (url.indexOf('?') === -1 ? '?' : '&') + '_retry=' + Date.now()
+        : url;
+    }
+
+    function fetchTileBlobWithRetry_(url, attemptsLeft) {
+      if (attemptsLeft === undefined) attemptsLeft = TILE_LOAD_ATTEMPTS;
+      return fetch(url).then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.blob();
+      }).then(function (blob) {
+        if (!blob || blob.size === 0) throw new Error('tuile vide');
+        return blob;
+      }).catch(function (err) {
+        if (attemptsLeft > 1) {
+          return sleep_(TILE_RETRY_DELAY_MS).then(function () {
+            return fetchTileBlobWithRetry_(url, attemptsLeft - 1);
+          });
+        }
+        throw err;
+      });
+    }
+
     const OfflineTileLayer = L.TileLayer.extend({
       createTile: function (coords, done) {
         const img = document.createElement('img');
@@ -826,27 +869,20 @@
             // Pas en cours d'enregistrement : simple affichage, sans mise en
             // cache — c'est justement le but de l'interrupteur ⬇️/⏹️, pouvoir
             // se balader sans faire grossir le stockage hors-ligne.
-            img.onload = function () { done(null, img); };
-            img.onerror = function (e) { done(e, img); };
-            img.src = url;
+            loadTileImgWithRetry_(img, url, function (err) { done(err || null, img); });
             return;
           }
-          fetch(url).then(function (resp) {
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            return resp.blob();
-          }).then(function (fetchedBlob) {
-            if (!fetchedBlob || fetchedBlob.size === 0) throw new Error('tuile vide');
+          fetchTileBlobWithRetry_(url).then(function (fetchedBlob) {
             putCachedTile_(key, fetchedBlob).catch(function () { /* non bloquant */ });
             attributeTileToRecording_(key, fetchedBlob);
             img.onload = function () { done(null, img); };
             img.onerror = function (e) { done(e, img); };
             img.src = URL.createObjectURL(fetchedBlob);
           }).catch(function () {
-            // fetch a échoué (hors-ligne, CORS, etc.) : on retombe sur un
-            // chargement <img> classique, juste sans mise en cache cette fois.
-            img.onload = function () { done(null, img); };
-            img.onerror = function (e) { done(e, img); };
-            img.src = url;
+            // Toutes les tentatives via fetch() ont échoué (hors-ligne, CORS,
+            // etc.) : on retombe sur un chargement <img> classique (avec ses
+            // propres réessais), juste sans mise en cache cette fois.
+            loadTileImgWithRetry_(img, url, function (err) { done(err || null, img); });
           });
         });
         return img;
@@ -1073,8 +1109,8 @@
               nextStopAt = dist + stepMeters;
               map.setView(latlngs[i], zoom, { animate: false });
               updateRecordingStatus_('Balade automatique : zoom ' + zoom + ' (niveau ' + (zi + 1) + '/' + AUTO_TOUR_ZOOMS.length + ') · étape ' + Math.min(stopIndex, totalStops) + '/' + totalStops);
-              await waitForTilesLoaded_(4000);
-              await sleep_(150);
+              await waitForTilesLoaded_(2000);
+              await sleep_(50);
             }
           }
         }
