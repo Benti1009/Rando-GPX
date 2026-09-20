@@ -76,6 +76,12 @@
       white-space: normal; line-height: 1.3;
       max-width: 120px;
     }
+    .clear-track-btn {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      font-size: 13px; line-height: 1; padding: 4px; color: #6b7280; opacity: 0.8;
+    }
+    .clear-track-btn:active { opacity: 1; }
+    .clear-track-btn[hidden] { display: none; }
 
     #stats {
       display: none;
@@ -267,6 +273,7 @@
         <h1>Rando GPX <span id="appVersion" class="app-version"></span></h1>
         <div style="display:flex; align-items:center; gap:10px;">
           <span id="fileName"></span>
+          <button id="clearTrackBtn" class="clear-track-btn" aria-label="Retirer le tracé" hidden>✕</button>
           <label class="file-btn" for="gpxFile" style="flex-shrink:0;">Choisir un fichier</label>
           <!-- Pas d'attribut "accept" : iOS ne connaît pas l'extension .gpx (contrairement à
                .pdf ou .jpg) et grise le fichier dans le sélecteur si on tente de filtrer dessus.
@@ -318,6 +325,7 @@
         <select id="offlineBasemapSelect" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 14px; font-family: inherit; margin-bottom: 8px; background: #fff;">
           <option value="osm">OpenStreetMap</option>
           <option value="ign">IGN (Plan IGN)</option>
+          <option value="ign_satellite">IGN Satellite</option>
           <option value="opentopo">OpenTopoMap</option>
         </select>
         <hr class="setting-divider">
@@ -376,8 +384,8 @@
 
         <h3>Fonds de carte</h3>
         <p>Le sélecteur de calques en haut à droite de la carte permet de changer de fond
-        (OpenStreetMap, IGN, OpenTopoMap). Seul le fond choisi comme référence dans Paramètres
-        est mis en cache hors-ligne ; les autres nécessitent une connexion.</p>
+        (OpenStreetMap, IGN, IGN Satellite, OpenTopoMap). Seul le fond choisi comme référence dans
+        Paramètres est mis en cache hors-ligne ; les autres nécessitent une connexion.</p>
 
         <h3>Échelle</h3>
         <p>La barre en bas à gauche de la carte indique l'échelle (distance réelle) selon le
@@ -410,7 +418,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.25.3';
+    const APP_VERSION = '1.25.4';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -683,6 +691,12 @@
         label: 'IGN (Plan IGN)',
         // Service Géoplateforme de l'IGN, ouvert et sans clé depuis 2024.
         url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png',
+        options: { maxZoom: 19, minZoom: 0, attribution: '&copy; <a href="https://www.ign.fr">IGN-F/Géoportail</a>' }
+      },
+      ign_satellite: {
+        label: 'IGN Satellite',
+        // Même service Géoplateforme, couche orthophotos (imagerie aérienne/satellite).
+        url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg',
         options: { maxZoom: 19, minZoom: 0, attribution: '&copy; <a href="https://www.ign.fr">IGN-F/Géoportail</a>' }
       },
       opentopo: {
@@ -1513,7 +1527,25 @@
 
       map.fitBounds(currentLine.getBounds(), { padding: [24, 24] });
       document.getElementById('emptyOverlay').style.display = 'none';
+      document.getElementById('clearTrackBtn').hidden = false;
     }
+
+    // Retire le tracé actuellement affiché pour revenir à une vue sans tracé
+    // (sans changer la position/zoom de la carte), sans supprimer aucune carte
+    // hors-ligne déjà téléchargée.
+    document.getElementById('clearTrackBtn').addEventListener('click', function () {
+      stopRecordingIfActive_();
+      clearTrack_();
+      currentGpxName = null;
+      currentGpxText = null;
+      document.getElementById('fileName').textContent = '';
+      document.getElementById('gpxFile').value = '';
+      document.getElementById('stats').style.display = 'none';
+      document.getElementById('stats').innerHTML = '';
+      document.getElementById('emptyOverlay').style.display = 'flex';
+      document.getElementById('clearTrackBtn').hidden = true;
+      showMessage_('');
+    });
 
     // ========================================================================
     // Lecture / parsing du fichier GPX (entièrement côté client, rien n'est envoyé au serveur)
