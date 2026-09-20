@@ -385,7 +385,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.22.7';
+    const APP_VERSION = '1.22.8';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -500,6 +500,19 @@
       let gestureStartZoom = 0;
       let gestureCenter = null;
       let gestureMoved = false;
+      // Le zoom continu (glissé) est appliqué au rythme de l'écran (via rAF)
+      // plutôt qu'à chaque événement tactile brut, qui peut arriver plus
+      // souvent que l'affichage ne peut suivre : ça évite les à-coups liés
+      // au recalcul répété des tuiles et du tracé pendant le glissé.
+      let rafId = null;
+      let pendingDeltaY = null;
+
+      function applyPendingZoom_() {
+        rafId = null;
+        if (!gestureActive || pendingDeltaY === null) return;
+        const newZoom = gestureStartZoom + pendingDeltaY / PIXELS_PER_ZOOM_LEVEL;
+        map.setZoomAround(gestureCenter, newZoom, { animate: false });
+      }
 
       mapEl.addEventListener('touchstart', function (e) {
         if (gestureActive) return;
@@ -534,18 +547,22 @@
         const touch = e.touches[0];
         const deltaY = gestureStartY - touch.clientY; // vers le haut = positif
         if (Math.abs(deltaY) > DRAG_MOVE_THRESHOLD) gestureMoved = true;
-        const newZoom = gestureStartZoom + deltaY / PIXELS_PER_ZOOM_LEVEL;
-        map.setZoomAround(gestureCenter, newZoom, { animate: false });
+        pendingDeltaY = deltaY;
+        if (rafId === null) {
+          rafId = requestAnimationFrame(applyPendingZoom_);
+        }
       }, { passive: false });
 
       function endGesture_() {
         if (!gestureActive) return;
         gestureActive = false;
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+        pendingDeltaY = null;
         map.dragging.enable();
         if (!gestureMoved) {
           // Simple double-tap, sans glissé : zoom avant d'un niveau, comme un
-          // double-tap classique.
-          map.setZoomAround(gestureCenter, gestureStartZoom + 1);
+          // double-tap classique, avec une animation explicite et douce.
+          map.setZoomAround(gestureCenter, gestureStartZoom + 1, { animate: true });
         }
       }
       mapEl.addEventListener('touchend', endGesture_);
