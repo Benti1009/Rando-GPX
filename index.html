@@ -26,11 +26,16 @@
       overscroll-behavior-y: none;
       font-family: 'Barlow', -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color: #1f2430;
+      /* Même gris que la carte (#map) : si un espace apparaît brièvement
+         pendant une transition (repli du bandeau, animation de zoom), on
+         évite un flash blanc disgracieux en gardant un fond cohérent. */
+      background: #e5e7eb;
     }
 
     #app {
       display: flex; flex-direction: column;
       height: 100vh; height: 100dvh;
+      background: #e5e7eb;
     }
 
     header {
@@ -385,7 +390,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.22.8';
+    const APP_VERSION = '1.22.9';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
