@@ -301,13 +301,14 @@
           Safari), l'accord dépend surtout du fait que l'app soit ajoutée à l'écran d'accueil.
         </p>
         <hr class="setting-divider">
-        <button id="clearCacheBtn" class="file-btn danger" style="width: 100%; text-align: center;">
-          🗑️ Vider le cache et recharger
+        <button id="checkUpdateBtn" class="file-btn" style="width: 100%; text-align: center; background: #2563eb;">
+          🔄 Vérifier les mises à jour
         </button>
         <p style="font-size: 13px; color: #6b7280; margin: 8px 0 0;">
-          Vide le cache technique de l'application (fichiers HTML/JS/CSS et Service Worker)
-          pour forcer le téléchargement de la dernière version publiée. Vos cartes hors-ligne
-          téléchargées ne sont pas supprimées.
+          Compare la version installée à la dernière version publiée. En cas de nouvelle
+          version, propose de la télécharger (le cache technique est alors vidé et l'appli se
+          recharge). Vos cartes hors-ligne téléchargées ne sont jamais touchées. Cette
+          vérification se fait aussi automatiquement à l'ouverture de l'appli.
         </p>
         <hr class="setting-divider">
         <button id="clearAllDataBtn" class="file-btn danger" style="width: 100%; text-align: center;">
@@ -372,8 +373,9 @@
         <p><b>Fond hors-ligne</b> — choisit quel fond de carte est mis en cache par le bouton ⬇️.</p>
         <p><b>Stockage persistant</b> — demande au navigateur de ne pas effacer automatiquement
         les cartes téléchargées en cas de manque de place.</p>
-        <p><b>Vider le cache et recharger</b> — force le téléchargement de la dernière version de
-        l'appli, sans toucher aux cartes hors-ligne déjà téléchargées.</p>
+        <p><b>Vérifier les mises à jour</b> — compare la version installée à la dernière version
+        publiée et propose de la télécharger si besoin, sans toucher aux cartes hors-ligne déjà
+        téléchargées. Se fait aussi automatiquement à l'ouverture de l'appli.</p>
         <p><b>Supprimer toutes les données</b> — efface définitivement toutes les cartes
         hors-ligne et les tracés enregistrés avec elles.</p>
 
@@ -390,7 +392,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.23.1';
+    const APP_VERSION = '1.24.0';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -420,6 +422,54 @@
         });
       });
     }
+
+    // ========================================================================
+    // Vérification des mises à jour : compare APP_VERSION à version.json,
+    // lu directement sur le réseau (le Service Worker l'exclut exprès de son
+    // cache — voir sw.js). "Vérifier les mises à jour" dans Paramètres fait
+    // cette vérification à la demande ; elle est aussi lancée automatiquement
+    // (en tâche de fond, sans bloquer l'ouverture) à chaque lancement de
+    // l'appli.
+    // ========================================================================
+    async function fetchRemoteVersion_() {
+      const resp = await fetch('./version.json?_=' + Date.now(), { cache: 'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      return data.version;
+    }
+
+    async function performUpdate_() {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        }
+      } catch (e) {
+        console.warn('Échec du nettoyage du cache :', e);
+      }
+      // Cache-buster dans l'URL pour forcer le navigateur à re-télécharger
+      // index.html lui-même plutôt que de servir une copie en cache HTTP.
+      const url = new URL(location.href);
+      url.searchParams.set('_v', Date.now().toString());
+      location.href = url.toString();
+    }
+
+    setTimeout(function () {
+      fetchRemoteVersion_().then(function (remoteVersion) {
+        if (remoteVersion && remoteVersion !== APP_VERSION) {
+          const proceed = confirm('Une nouvelle version de Rando GPX est disponible (v' + remoteVersion +
+            ', actuelle v' + APP_VERSION + '). Mettre à jour maintenant ?');
+          if (proceed) performUpdate_();
+        }
+      }).catch(function () {
+        // Hors-ligne ou erreur réseau au lancement : pas grave, on
+        // réessaiera au prochain lancement (ou via le bouton dans Paramètres).
+      });
+    }, 1500);
 
     // ========================================================================
     // Carte
@@ -1179,31 +1229,29 @@
       btn.disabled = false;
       btn.textContent = originalText;
     });
-    document.getElementById('clearCacheBtn').addEventListener('click', async function () {
-      if (!confirm('Vider le cache technique et recharger la page ? Vos cartes hors-ligne téléchargées seront conservées.')) return;
-
+    document.getElementById('checkUpdateBtn').addEventListener('click', async function () {
       const btn = this;
+      const originalText = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Nettoyage…';
-
+      btn.textContent = 'Vérification…';
       try {
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map(function (r) { return r.unregister(); }));
-        }
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        const remoteVersion = await fetchRemoteVersion_();
+        if (remoteVersion === APP_VERSION) {
+          showMessage_('✅ Déjà à jour (v' + APP_VERSION + ').', 'info');
+        } else {
+          const proceed = confirm('Nouvelle version disponible (v' + remoteVersion + ', actuelle v' +
+            APP_VERSION + '). Mettre à jour maintenant ?');
+          if (proceed) {
+            btn.textContent = 'Mise à jour…';
+            await performUpdate_();
+            return; // la page se recharge, inutile de réactiver le bouton
+          }
         }
       } catch (e) {
-        console.warn('Échec du nettoyage du cache :', e);
+        showMessage_('Impossible de vérifier les mises à jour (pas de connexion ?).', 'error');
       }
-
-      // Cache-buster dans l'URL pour forcer le navigateur à re-télécharger
-      // index.html lui-même plutôt que de servir une copie en cache HTTP.
-      const url = new URL(location.href);
-      url.searchParams.set('_v', Date.now().toString());
-      location.href = url.toString();
+      btn.disabled = false;
+      btn.textContent = originalText;
     });
     document.getElementById('clearAllDataBtn').addEventListener('click', async function () {
       if (!confirm('Supprimer TOUTES les cartes hors-ligne (téléchargées et mises en cache) ainsi que les tracés enregistrés avec elles ? Cette action est irréversible.')) return;

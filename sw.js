@@ -5,7 +5,7 @@
 // par la page elle-même via IndexedDB (bouton "Télécharger hors-ligne") :
 // ce Service Worker les ignore volontairement.
 
-const CACHE_NAME = 'rando-gpx-shell-v9';
+const CACHE_NAME = 'rando-gpx-shell-v10';
 
 // Ressources same-origin (servies par GitHub Pages, à côté de ce fichier)
 const SAME_ORIGIN_ASSETS = [
@@ -58,6 +58,11 @@ self.addEventListener('fetch', function (event) {
   if (req.url.indexOf('tile.openstreetmap.org') !== -1) return;
   if (req.url.indexOf('data.geopf.fr') !== -1) return;
   if (req.url.indexOf('tile.opentopomap.org') !== -1) return;
+  // version.json est volontairement laissé hors du cache du Service Worker :
+  // c'est justement le fichier utilisé pour détecter qu'une nouvelle version
+  // existe, il doit donc toujours être lu sur le réseau, jamais servi depuis
+  // une copie locale potentiellement périmée.
+  if (req.url.indexOf('/version.json') !== -1) return;
 
   // Uniquement les requêtes GET peuvent être mises en cache.
   if (req.method !== 'GET') return;
