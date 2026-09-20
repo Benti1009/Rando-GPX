@@ -392,7 +392,7 @@
     // publication pour vérifier facilement (surtout après "Vider le cache")
     // que la dernière version est bien chargée.
     // ========================================================================
-    const APP_VERSION = '1.24.1';
+    const APP_VERSION = '1.25.0';
     document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 
     // ========================================================================
@@ -1092,7 +1092,7 @@
           const size = map.getSize();
           const centerLat = latlngs[Math.floor(latlngs.length / 2)].lat;
           const metersPerPixel = 156543.03392 * Math.cos(centerLat * Math.PI / 180) / Math.pow(2, zoom);
-          const stepMeters = Math.max(50, Math.min(size.x, size.y) * 0.6 * metersPerPixel);
+          const stepMeters = Math.max(50, Math.min(size.x, size.y) * 0.8 * metersPerPixel);
 
           let dist = 0;
           let nextStopAt = 0;
@@ -1109,8 +1109,7 @@
               nextStopAt = dist + stepMeters;
               map.setView(latlngs[i], zoom, { animate: false });
               updateRecordingStatus_('Balade automatique : zoom ' + zoom + ' (niveau ' + (zi + 1) + '/' + AUTO_TOUR_ZOOMS.length + ') · étape ' + Math.min(stopIndex, totalStops) + '/' + totalStops);
-              await waitForTilesLoaded_(2000);
-              await sleep_(50);
+              await waitForTilesLoaded_(900);
             }
           }
         }

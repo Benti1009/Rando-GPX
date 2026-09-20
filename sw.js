@@ -5,7 +5,7 @@
 // par la page elle-même via IndexedDB (bouton "Télécharger hors-ligne") :
 // ce Service Worker les ignore volontairement.
 
-const CACHE_NAME = 'rando-gpx-shell-v11';
+const CACHE_NAME = 'rando-gpx-shell-v12';
 
 // Ressources same-origin (servies par GitHub Pages, à côté de ce fichier)
 const SAME_ORIGIN_ASSETS = [
